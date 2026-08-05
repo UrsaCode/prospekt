@@ -1,0 +1,16 @@
+# Session/assistant scratch state
+.remember/
+.claude/
+
+# OS / editor cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Packaged builds
+*.zip
+*.crx
+*.pem

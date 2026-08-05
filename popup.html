@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    color-scheme: dark light;
+    --bg: #0a0a0f;
+    --surface: #0a0a0f;
+    --line: rgba(255,255,255,.07);
+    --text: #e9ecf8;
+    --muted: #8a8aa3;
+    --accent: #10b981;
+    --purple: #a78bfa;
+    --blue: #60a5fa;
+    --pink: #f472b6;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --line: rgba(9,9,18,.10);
+      --text: #14141f;
+      --muted: #61617a;
+      --accent: #047857;
+      --purple: #6d28d9;
+      --blue: #1d4ed8;
+      --pink: #be185d;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 300px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .hdr { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
+  .hdr .logo {
+    width: 30px; height: 30px;
+    background: linear-gradient(135deg, #10b981, #059669);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+  }
+  .hdr .logo svg { width: 16px; height: 16px; }
+  .hdr h1 { font-size: 14px; font-weight: 700; flex: 1; }
+  .hdr .v { font-size: 9px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); padding: 2px 6px; border-radius: 4px; font-weight: 700; font-family: ui-monospace, monospace; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+  .st { background: var(--surface); padding: 12px 4px; text-align: center; }
+  .st .n { font-size: 18px; font-weight: 700; font-family: ui-monospace, SFMono-Regular, monospace; }
+  .st .l { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+  .st:nth-child(1) .n { color: var(--accent); }
+  .st:nth-child(2) .n { color: var(--purple); }
+  .st:nth-child(3) .n { color: var(--blue); }
+  .st:nth-child(4) .n { color: var(--pink); }
+
+  .body { padding: 14px 16px; }
+  .open-btn {
+    width: 100%; padding: 10px;
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: #fff; border: none; border-radius: 8px;
+    font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    box-shadow: 0 2px 12px rgba(16,185,129,.25);
+    transition: box-shadow .15s, transform .15s;
+  }
+  .open-btn:hover { box-shadow: 0 4px 20px rgba(16,185,129,.35); transform: translateY(-1px); }
+  .open-btn svg { width: 14px; height: 14px; }
+
+  .note { text-align: center; font-size: 10px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+  #scanState { color: var(--accent); font-weight: 600; }
+  #scanState.paused { color: #f59e0b; }
+</style>
+</head>
+<body>
+  <div class="hdr">
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg></div>
+    <h1>Prospekt</h1>
+    <span class="v" id="version">—</span>
+  </div>
+  <div class="stats">
+    <div class="st"><div class="n" id="sE">—</div><div class="l">Emails</div></div>
+    <div class="st"><div class="n" id="sP">—</div><div class="l">Phones</div></div>
+    <div class="st"><div class="n" id="sS">—</div><div class="l">Socials</div></div>
+    <div class="st"><div class="n" id="sC">—</div><div class="l">Custom</div></div>
+  </div>
+  <div class="body">
+    <button class="open-btn" id="openBtn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Open Dashboard
+    </button>
+    <div class="note">Auto-scanning is <span id="scanState">…</span><br>Contacts are saved automatically</div>
+  </div>
+<script src="popup.js"></script>
+</body>
+</html>
