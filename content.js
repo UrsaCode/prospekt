@@ -100,16 +100,9 @@
     });
   }
 
-  function isValidPhone(raw) {
-    const text = String(raw).trim();
-    const digits = text.replace(/\D/g, "");
-    if (digits.length < 7 || digits.length > 15) return false;
-    if (/^(\d)\1+$/.test(digits)) return false;                                  // 0000000
-    if (/^(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(text)) return false;      // 2024-01-15
-    if (/^\d{1,2}[-/.]\d{1,2}[-/.](?:19|20)\d{2}$/.test(text)) return false;      // 15-01-2024
-    if (/^\d+(\.\d+){2,}$/.test(text)) return false;                             // 1.2.3.4 versions/IPs
-    return true;
-  }
+  // Shared with the settings tester so both agree on what counts as a phone.
+  const isValidPhone = PROSPEKT.isValidPhone;
+
 
   // ── Extractors ────────────────────────────────────────────────────────
   function bodyText() {

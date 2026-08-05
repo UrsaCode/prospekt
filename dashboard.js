@@ -178,6 +178,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupAutoScanToggle();
   setupDrawer();
   setupRange();
+  setupSettingsIO();
   reflectAutoScan();
   if (!routeFromHash()) renderPage("overview");
 });
@@ -294,8 +295,10 @@ async function renderPage(page) {
     exportFor === "scans" ? " Export scans" : exportFor === "insights" ? " Export report" : " Export all";
   exportBtn.dataset.exportType = exportFor;
 
-  // The range selector only means something on Insights.
+  // Controls that only mean something on one page.
   document.getElementById("rangeSelect").style.display = page === "insights" ? "" : "none";
+  document.getElementById("settingsIO").style.display = page === "settings" ? "" : "none";
+  exportBtn.style.display = page === "settings" ? "none" : "";
 
   const stats = await bg({ action: "getStats" });
   document.getElementById("navContactCount").textContent = num(stats?.totalContacts);
@@ -1334,154 +1337,310 @@ function setDirty(dirty) {
   document.getElementById("patternSaveBar")?.classList.toggle("visible", dirty);
 }
 
+const SETTINGS_TABS = [
+  { key: "scanning", label: "Scanning" },
+  { key: "patterns", label: "Patterns" },
+  { key: "social", label: "Social" },
+  { key: "custom", label: "Custom" },
+  { key: "filters", label: "Filter lists" },
+  { key: "data", label: "Data" },
+  { key: "danger", label: "Danger zone" },
+];
+
+const FILTER_LISTS = [
+  { id: "skipDomainsTags", key: "skipDomains", label: "Skip domains", hint: "Pages on these domains are never read" },
+  { id: "junkDomainsTags", key: "junkEmailDomains", label: "Junk email domains", hint: "Addresses on these domains are discarded" },
+  { id: "junkPrefixesTags", key: "junkEmailPrefixes", label: "Junk email prefixes", hint: "Addresses whose local part matches exactly are discarded" },
+  { id: "junkSocialTags", key: "junkSocialPaths", label: "Junk social paths", hint: "Social URLs on these path segments are discarded" },
+];
+
+// ── Regex tester ─────────────────────────────────────────────────────────
+/**
+ * Highlight every match in `text`. Built by slicing the raw string and escaping
+ * each segment, so the output is safe even though the input is user text.
+ */
+function highlightMatches(text, source, flags, validate) {
+  let re;
+  try {
+    re = new RegExp(source, flags.includes("g") ? flags : flags + "g");
+  } catch (e) {
+    return { error: e.message, html: esc(text), count: 0, kept: 0, dropped: 0 };
+  }
+
+  let out = "";
+  let last = 0;
+  let count = 0;
+  let dropped = 0;
+  let guard = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    // A pattern that can match the empty string would otherwise spin forever.
+    if (m.index === re.lastIndex) { re.lastIndex++; continue; }
+    if (++guard > 2000) break;
+    // Extraction runs validation after matching, so a raw match count would
+    // overstate what actually gets kept. Rejected matches are shown struck out.
+    const ok = validate ? validate(m[0]) : true;
+    if (!ok) dropped++;
+    out += esc(text.slice(last, m.index))
+      + `<mark class="${ok ? "" : "rejected"}">${esc(m[0])}</mark>`;
+    last = m.index + m[0].length;
+    count++;
+  }
+  out += esc(text.slice(last));
+  return { html: out, count, kept: count - dropped, dropped, truncated: guard > 2000 };
+}
+
+function runTester(id) {
+  const panel = document.getElementById(`test-${id}`);
+  if (!panel || panel.hidden) return;
+  const input = document.getElementById(id);
+  const flags = document.getElementById(`${id}-flags`)?.value || "g";
+  const text = panel.querySelector(".tester-input").value;
+  // Only the phone pattern has a post-match validator today.
+  const validate = id === "pat-phone" ? PROSPEKT.isValidPhone : null;
+  const res = highlightMatches(text, input.value, flags, validate);
+
+  const count = panel.querySelector(".tester-count");
+  const out = panel.querySelector(".tester-out");
+  if (res.error) {
+    count.textContent = "invalid regex";
+    count.className = "tester-count is-bad";
+    out.innerHTML = `<span class="tester-err">${esc(res.error)}</span>`;
+    return;
+  }
+  const plural = n => `${n} match${n === 1 ? "" : "es"}`;
+  count.textContent = res.dropped
+    ? `${plural(res.count)} · ${res.kept} kept, ${res.dropped} discarded by validation`
+    : plural(res.count) + (res.truncated ? " (showing first 2000)" : "");
+  count.className = "tester-count" + (res.kept ? " is-ok" : "") + (res.dropped ? " has-drops" : "");
+  out.innerHTML = res.html;
+}
+
+function testerPanel(id) {
+  return `
+    <div class="tester" id="test-${id}" hidden>
+      <label class="tester-k">Sample text</label>
+      <textarea class="tester-input" spellcheck="false" rows="6">${esc(PROSPEKT.SAMPLE_TEXT)}</textarea>
+      <div class="tester-count">—</div>
+      <pre class="tester-out"></pre>
+    </div>`;
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────
 async function renderSettings() {
   const el = document.getElementById("page-settings");
+
   const storedPatterns = await bg({ action: "getPatterns" });
-  // `undefined` means the request failed, not that nothing is stored. Rendering
-  // defaults here would let the next Save silently overwrite the user's real
-  // patterns with them.
   if (storedPatterns === undefined) {
     el.innerHTML = emptyState("⚠️", "Couldn't load your settings",
-      "The extension's background worker didn't respond. Reload this page to try again — nothing has been changed.");
+      "The background worker didn't respond. Reload this page to try again — nothing has been changed.");
     return;
   }
 
   const settings = { ...PROSPEKT.DEFAULT_SETTINGS, ...(await bg({ action: "getSettings" }) || {}) };
   prefs = settings;
-  const stats = { ...EMPTY_STATS, ...(await bg({ action: "getStats" }) || {}) };
   const P = PROSPEKT.resolvePatterns(storedPatterns);
   const D = PROSPEKT.DEFAULTS;
+  const insights = await bg({ action: "getInsights", range: "all" });
+  const health = Object.fromEntries((insights?.patterns || []).map(p => [p.name, p]));
+  const ov = await bg({ action: "getOverview" }) || {};
+  const scanList = await bg({ action: "getScans", filters: { limit: 1 } });
 
-  const regexRow = (id, label, value, placeholder) => `
-    <div class="pat-row">
-      <label class="pat-label" for="${id}">${esc(label)}</label>
-      <div class="pat-input-wrap">
-        <span class="pat-slash" aria-hidden="true">/</span>
-        <input type="text" class="pat-input" id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}" spellcheck="false">
-        <span class="pat-slash" aria-hidden="true">/</span>
-        <button type="button" class="pat-test-btn" data-test="${id}">Test</button>
-      </div>
-      <div class="pat-error" id="${id}-error" role="status"></div>
+  document.getElementById("pageSubtitle").textContent = "v" + chrome.runtime.getManifest().version;
+
+  const meter = (used, max) => {
+    const pct = max ? Math.min(100, (used / max) * 100) : 0;
+    return `<div class="lim-meter">
+      <div class="lim-head"><span>${num(used)} stored</span><span>${Math.round(pct)}%</span></div>
+      <div class="lim-track"><i style="width:${Math.max(1, pct)}%;background:var(--${pct > 85 ? "phone" : "accent"})"></i></div>
     </div>`;
+  };
 
-  const tagList = (id, label, description, items) => `
-    <div class="pat-row">
-      <label class="pat-label" for="${id}-input">${esc(label)}<small class="pat-desc">${esc(description)}</small></label>
-      <div class="tag-container" id="${id}">
-        ${(items || []).map(item => tagChip(item)).join("")}
-        <input type="text" id="${id}-input" class="tag-input" placeholder="Type &amp; press Enter" data-for="${id}">
+  const healthBadge = name => {
+    const h = health[name]?.health;
+    if (!h) return "";
+    return `<span class="health health-${h.tone}">${esc(h.text)}</span>`;
+  };
+
+  const statLine = name => {
+    const h = health[name];
+    if (!h) return "";
+    return `<span class="pc-stat">${num(h.matches)} matches${h.lastMatch ? ` · last ${esc(timeAgo(h.lastMatch))}` : ""}</span>`;
+  };
+
+  const patternCard = (id, name, tone, source, flags, flagsId) => `
+    <div class="pc">
+      <div class="pc-hd">
+        <span class="pat-dot" style="background:var(--${tone})"></span>
+        <span class="pc-name">${esc(name)}</span>
+        ${statLine(name)}
+        <span class="pc-spacer"></span>
+        ${healthBadge(name)}
+      </div>
+      <div class="pc-body">
+        <div class="pat-input-wrap">
+          <span class="pat-slash">/</span>
+          <input type="text" class="pat-input" id="${id}" value="${esc(source)}" spellcheck="false">
+          <span class="pat-slash">/</span>
+          <input type="text" class="pat-flags" id="${flagsId}" value="${esc(flags)}" spellcheck="false" aria-label="${esc(name)} flags">
+          <button type="button" class="pat-test-btn" data-test="${id}">Test</button>
+        </div>
+        <div class="pat-error" id="${id}-error" role="status"></div>
+        ${testerPanel(id)}
       </div>
     </div>`;
 
   const socialRows = (P.socialPatterns || []).map(sp => socialRowHtml(sp)).join("");
-  const customRows = (P.customPatterns || []).map(cp => customRowHtml(cp)).join("");
-  const hasCustoms = (P.customPatterns || []).length > 0;
+  const customCards = (P.customPatterns || []).map((cp, i) => `
+    <div class="pc" data-custom-row="${i}">
+      <div class="pc-hd">
+        <span class="pat-dot" style="background:var(--custom)"></span>
+        <input type="text" class="tbl-input custom-label pc-label" value="${esc(cp.label)}" placeholder="Label" aria-label="Custom pattern label">
+        ${statLine(cp.label)}
+        <span class="pc-spacer"></span>
+        ${healthBadge(cp.label)}
+        <button type="button" class="cell-btn del custom-del" title="Remove" aria-label="Remove pattern">${IC.trash}</button>
+      </div>
+      <div class="pc-body">
+        <div class="pat-input-wrap">
+          <span class="pat-slash">/</span>
+          <input type="text" class="pat-input custom-regex" id="cx-${i}" value="${esc(cp.regex)}" spellcheck="false">
+          <span class="pat-slash">/</span>
+          <input type="text" class="pat-flags custom-flags" id="cx-${i}-flags" value="${esc(cp.flags || "g")}" spellcheck="false" aria-label="Flags">
+          <button type="button" class="pat-test-btn" data-test="cx-${i}">Test</button>
+        </div>
+        ${testerPanel(`cx-${i}`)}
+      </div>
+    </div>`).join("");
 
+  const tagList = (list, items) => `
+    <div class="pat-row">
+      <label class="pat-label" for="${list.id}-input">
+        ${esc(list.label)}<small class="pat-desc">${esc(list.hint)}</small>
+      </label>
+      <div class="list-tools">
+        <span class="list-count">${num(items.length)}</span>
+        <button type="button" class="linkish" data-reset-list="${list.key}" data-target="${list.id}">Reset to default</button>
+      </div>
+      <div class="tag-container" id="${list.id}">
+        ${items.map(tagChip).join("")}
+        <input type="text" id="${list.id}-input" class="tag-input" placeholder="Add and press Enter" data-for="${list.id}">
+      </div>
+    </div>`;
+
+  const byType = ov.byType || {};
   const warn = settings.storageWarning;
-  const warningBanner = warn ? `
-    <div class="banner banner-warn">
-      <strong>Storage limit reached on ${esc(fullDate(warn.at))}.</strong>
-      Prospekt dropped ${num(warn.droppedContacts)} older contact${warn.droppedContacts === 1 ? "" : "s"}
-      and ${num(warn.droppedScans)} scan record${warn.droppedScans === 1 ? "" : "s"} to keep working.
-      Export your data and lower the limits below to avoid this.
-      <button type="button" class="btn btn-ghost btn-sm" id="dismissWarnBtn">Dismiss</button>
-    </div>` : "";
 
   el.innerHTML = `
-    ${warningBanner}
-    <div class="settings-group">
+    <nav class="set-tabs" id="setTabs">
+      ${SETTINGS_TABS.map((t, i) => `<button type="button" class="set-tab ${i === 0 ? "on" : ""}" data-tab="${t.key}">${esc(t.label)}</button>`).join("")}
+    </nav>
+
+    ${warn ? `
+      <div class="banner banner-warn">
+        <strong>Storage limit reached on ${esc(fullDate(warn.at))}.</strong>
+        ${num(warn.droppedContacts)} contacts and ${num(warn.droppedScans)} scan records were dropped to keep working.
+        <button type="button" class="btn btn-ghost btn-sm" id="dismissWarnBtn">Dismiss</button>
+      </div>` : ""}
+
+    <section class="settings-group" id="set-scanning">
       <h3>Scanning</h3>
+      <p class="pat-intro">Prospekt reads the text of pages you visit and keeps anything matching your patterns. Nothing leaves this device.</p>
+
       <div class="setting-row">
-        <div class="setting-label"><label for="toggleAutoScan">Auto-scan pages</label><small>Extract contacts from every page you visit</small></div>
+        <div class="setting-label"><label for="toggleAutoScan">Scan pages automatically</label>
+          <small>Every page you open is read as it loads. Turn this off to scan only when you click the toolbar icon.</small></div>
         <button type="button" id="toggleAutoScan" class="toggle ${settings.autoScan !== false ? "on" : ""}"
-                role="switch" aria-checked="${settings.autoScan !== false}" aria-label="Auto-scan pages"></button>
+                role="switch" aria-checked="${settings.autoScan !== false}" aria-label="Scan pages automatically"></button>
       </div>
+
       <div class="setting-row">
-        <div class="setting-label"><label for="remoteFaviconsToggle">Load remote favicons</label><small>Off by default — fetching them would tell each site you're browsing your library</small></div>
+        <div class="setting-label"><label for="remoteFaviconsToggle">Load remote favicons</label>
+          <small>Off by default. Fetching them tells each site you're browsing your saved contacts.</small></div>
         <button type="button" id="remoteFaviconsToggle" class="toggle ${settings.remoteFavicons ? "on" : ""}"
                 role="switch" aria-checked="${!!settings.remoteFavicons}" aria-label="Load remote favicons"></button>
       </div>
+
       <div class="setting-row">
-        <div class="setting-label"><label for="maxScansInput">Max stored domains</label><small>Oldest scan records are dropped past this limit</small></div>
+        <div class="setting-label"><label for="maxScansInput">Maximum stored domains</label>
+          <small>Past this limit the oldest scan records are dropped. Contacts are kept either way.</small></div>
         <div class="setting-control">
+          ${meter(scanList?.total || 0, settings.maxScans)}
           <input type="number" id="maxScansInput" value="${esc(settings.maxScans)}" min="100" max="50000" step="100" class="num-input">
-          <button type="button" class="btn btn-accent btn-sm" id="saveLimitsBtn">Save</button>
         </div>
       </div>
+
       <div class="setting-row">
-        <div class="setting-label"><label for="maxContactsInput">Max stored contacts</label><small>Guards against filling the extension's storage quota</small></div>
+        <div class="setting-label"><label for="maxContactsInput">Maximum stored contacts</label>
+          <small>Guards the extension's storage quota. At the limit, new contacts stop being saved.</small></div>
         <div class="setting-control">
+          ${meter(ov.totalContacts || 0, settings.maxContacts)}
           <input type="number" id="maxContactsInput" value="${esc(settings.maxContacts)}" min="1000" max="200000" step="1000" class="num-input">
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="settings-group">
-      <h3>Extraction Patterns</h3>
-      <p class="pat-intro">Regexes used to pull contacts out of page text. Saving re-scans every open tab immediately.</p>
-      ${regexRow("pat-email", "Email Regex", P.emailRegex, D.emailRegex)}
-      ${regexRow("pat-phone", "Phone Regex", P.phoneRegex, D.phoneRegex)}
-    </div>
+    <section class="settings-group" id="set-patterns">
+      <h3>Extraction patterns</h3>
+      <p class="pat-intro">The regexes that pull contacts out of page text. Open the tester to see what a pattern catches before you save it — saving re-scans every open tab.</p>
+      ${patternCard("pat-email", "Email", "email", P.emailRegex, P.emailFlags || "gi", "pat-email-flags")}
+      ${patternCard("pat-phone", "Phone", "phone", P.phoneRegex, P.phoneFlags || "g", "pat-phone-flags")}
+    </section>
 
-    <div class="settings-group">
-      <h3>Social Platform Patterns</h3>
-      <p class="pat-intro">One row per platform. <strong>Platform ID</strong> is used internally, <strong>Label</strong> is what you see, <strong>Flags</strong> are regex flags (<code>gi</code> = global + case-insensitive).</p>
+    <section class="settings-group" id="set-social">
+      <h3>Social platforms</h3>
+      <p class="pat-intro">One row per platform. The ID is used internally, the label is what you see in the contacts table, and flags are regex flags — <code>gi</code> means global and case-insensitive.</p>
       <div class="table-wrap">
         <table class="pat-table">
-          <thead><tr><th style="width:120px">Platform ID</th><th style="width:130px">Label</th><th>Regex</th><th style="width:70px">Flags</th><th style="width:40px"><span class="sr-only">Remove</span></th></tr></thead>
+          <thead><tr><th style="width:120px">Platform ID</th><th style="width:130px">Label</th><th>Pattern</th><th style="width:70px">Flags</th><th style="width:40px"><span class="sr-only">Remove</span></th></tr></thead>
           <tbody id="socialTableBody">${socialRows}</tbody>
         </table>
       </div>
-      <button type="button" class="btn-add" id="addSocialBtn">+ Add Social Platform</button>
-    </div>
+      <button type="button" class="btn-add" id="addSocialBtn">+ Add platform</button>
+    </section>
 
-    <div class="settings-group">
-      <h3>Custom Patterns</h3>
-      <p class="pat-intro">Your own regexes — crypto wallets, SKUs, ticket IDs, anything. Matches are stored as <span class="cell-type type-custom">custom</span> contacts. Flags default to <code>g</code> (case-sensitive); add <code>i</code> to ignore case.</p>
-      <div class="table-wrap" id="customTableWrap" ${hasCustoms ? "" : "hidden"}>
-        <table class="pat-table">
-          <thead><tr><th style="width:180px">Label</th><th>Regex</th><th style="width:70px">Flags</th><th style="width:40px"><span class="sr-only">Remove</span></th></tr></thead>
-          <tbody id="customTableBody">${customRows}</tbody>
-        </table>
-      </div>
-      <button type="button" class="btn-add" id="addCustomBtn">+ Add Custom Pattern</button>
-    </div>
+    <section class="settings-group" id="set-custom">
+      <h3>Custom patterns</h3>
+      <p class="pat-intro">Your own regexes — crypto wallets, SKUs, ticket IDs, anything. Matches are stored as <span class="cell-type type-custom">custom</span> contacts. Flags default to <code>g</code>; add <code>i</code> to ignore case.</p>
+      <div id="customList">${customCards}</div>
+      <button type="button" class="btn-add" id="addCustomBtn">+ Add custom pattern</button>
+    </section>
 
-    <div class="settings-group">
-      <h3>Filter Lists</h3>
-      ${tagList("skipDomainsTags", "Skip Domains", "Pages on these domains are never scanned", P.skipDomains)}
-      ${tagList("junkDomainsTags", "Junk Email Domains", "Emails from these domains are ignored", P.junkEmailDomains)}
-      ${tagList("junkPrefixesTags", "Junk Email Prefixes", "Emails whose local part equals these are ignored", P.junkEmailPrefixes)}
-      ${tagList("junkSocialTags", "Junk Social Paths", "Social URLs on these path segments are ignored", P.junkSocialPaths)}
-    </div>
+    <section class="settings-group" id="set-filters">
+      <h3>Filter lists</h3>
+      <p class="pat-intro">Everything Prospekt should ignore. Type a value and press Enter to add it.</p>
+      ${FILTER_LISTS.map(l => tagList(l, P[l.key] || [])).join("")}
+    </section>
 
-    <div class="settings-group">
+    <section class="settings-group" id="set-data">
       <h3>Data</h3>
-      <div class="setting-row"><div class="setting-label">Contacts stored</div><span class="tone-accent mono-num">${num(stats.totalContacts)}</span></div>
-      <div class="setting-row"><div class="setting-label">Scans recorded</div><span class="tone-blue mono-num">${num(stats.totalScans)}</span></div>
+      <p class="pat-intro">Everything is stored locally in this browser profile. Export before you clear anything.</p>
       <div class="setting-row">
-        <div class="setting-label">Export all contacts</div>
-        <button type="button" class="btn btn-accent btn-sm" id="settingsExportContacts">Export Contacts</button>
+        <div class="setting-label">Contacts stored
+          <small>${num(byType.email)} emails · ${num(byType.phone)} phones · ${num(byType.social)} socials · ${num(byType.custom)} custom</small></div>
+        <button type="button" class="btn btn-accent btn-sm" id="settingsExportContacts">Export contacts</button>
       </div>
       <div class="setting-row">
-        <div class="setting-label">Export scan history</div>
-        <button type="button" class="btn btn-accent btn-sm" id="settingsExportScans">Export Scans</button>
+        <div class="setting-label">Scan records
+          <small>${num(ov.pagesScanned)} page scans across ${num(scanList?.total || 0)} domains</small></div>
+        <button type="button" class="btn btn-accent btn-sm" id="settingsExportScans">Export scans</button>
       </div>
-    </div>
+    </section>
 
-    <div class="settings-group danger">
-      <h3>Danger Zone</h3>
+    <section class="settings-group danger" id="set-danger">
+      <h3>Danger zone</h3>
+      <p class="pat-intro">Both of these are immediate and cannot be undone.</p>
       <div class="setting-row">
-        <div class="setting-label">Reset patterns<small>Restore every regex and filter list to its default</small></div>
-        <button type="button" class="btn btn-danger btn-sm" id="resetPatternsBtn">Reset Patterns</button>
+        <div class="setting-label">Reset every pattern and filter list
+          <small>Restores the shipped defaults. Your contacts and scan history are untouched.</small></div>
+        <button type="button" class="btn btn-danger btn-sm" id="resetPatternsBtn">Reset patterns</button>
       </div>
       <div class="setting-row">
-        <div class="setting-label">Clear all data<small>Permanently delete all contacts and scan history</small></div>
-        <button type="button" class="btn btn-danger btn-sm" id="clearAllBtn">Clear Everything</button>
+        <div class="setting-label">Delete all contacts and scan history
+          <small>Removes all ${num(ov.totalContacts)} contacts and ${num(ov.pagesScanned)} page scans from this device.</small></div>
+        <button type="button" class="btn btn-danger btn-sm" id="clearAllBtn">Clear everything</button>
       </div>
-    </div>
-
-    <p class="settings-footer">Prospekt v${esc(chrome.runtime.getManifest().version)} — free &amp; open source. All data stays on this device.</p>
+    </section>
 
     <div class="save-bar" id="patternSaveBar" role="region" aria-label="Unsaved changes">
       <span class="save-bar-text">You have unsaved pattern changes</span>
@@ -1493,73 +1652,68 @@ async function renderSettings() {
   `;
 
   setDirty(false);
-  wireSettings(el, settings);
+  wireSettings(el, settings, D);
 }
 
-const tagChip = value =>
-  `<span class="tag" data-value="${esc(value)}">${esc(value)}<button type="button" class="tag-x" aria-label="Remove ${esc(value)}">×</button></span>`;
-
-const socialRowHtml = (sp = {}) => `
-  <tr>
-    <td><input type="text" class="tbl-input social-platform" value="${esc(sp.platform)}" placeholder="platform_id"></td>
-    <td><input type="text" class="tbl-input social-label" value="${esc(sp.label)}" placeholder="Display Name"></td>
-    <td><input type="text" class="tbl-input social-regex" value="${esc(sp.regex)}" placeholder="https?://…" spellcheck="false"></td>
-    <td><input type="text" class="tbl-input social-flags" value="${esc(sp.flags || "gi")}" placeholder="gi" spellcheck="false"></td>
-    <td><button type="button" class="cell-btn del row-del" title="Remove" aria-label="Remove row">${IC.trash}</button></td>
-  </tr>`;
-
-const customRowHtml = (cp = {}) => `
-  <tr>
-    <td><input type="text" class="tbl-input custom-label" value="${esc(cp.label)}" placeholder="e.g. Crypto Wallets"></td>
-    <td><input type="text" class="tbl-input custom-regex" value="${esc(cp.regex)}" placeholder="Regex pattern" spellcheck="false"></td>
-    <td><input type="text" class="tbl-input custom-flags" value="${esc(cp.flags || "g")}" placeholder="g" spellcheck="false"></td>
-    <td><button type="button" class="cell-btn del row-del" title="Remove" aria-label="Remove row">${IC.trash}</button></td>
-  </tr>`;
-
-function wireSettings(el, settings) {
-  // Any edit anywhere in the pattern editor raises the save bar. v1 had a
-  // single Save button buried in one group, so edits to the social table,
-  // custom table and filter lists looked like they simply didn't stick.
+function wireSettings(el, settings, D) {
   // #page-settings outlives each render, so this is attached exactly once.
   if (!el.dataset.dirtyWatch) {
     el.dataset.dirtyWatch = "1";
     el.addEventListener("input", e => {
-      if (e.target.closest(".pat-row, .pat-table")) setDirty(true);
+      if (e.target.closest(".pat-row, .pat-table, .pc")) setDirty(true);
+      // Live tester feedback as you type the pattern or the sample.
+      const pc = e.target.closest(".pc");
+      if (pc && (e.target.classList.contains("pat-input")
+              || e.target.classList.contains("pat-flags")
+              || e.target.classList.contains("tester-input"))) {
+        const id = pc.querySelector(".pat-input")?.id;
+        if (id) runTester(id);
+      }
     });
   }
 
-  // The optimistic flip is reverted if the save fails. Previously the error
-  // envelope ({ok:false, error}) was truthy, so it was assigned straight into
-  // `prefs` — wiping every real setting — and the success toast still fired.
+  // Tabs scroll to their section and follow the scroll position.
+  const page = el;
+  el.querySelectorAll(".set-tab").forEach(tab => tab.addEventListener("click", () => {
+    document.getElementById("set-" + tab.dataset.tab)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+  if (!el.dataset.scrollWatch) {
+    el.dataset.scrollWatch = "1";
+    page.addEventListener("scroll", () => {
+      const tabs = [...page.querySelectorAll(".set-tab")];
+      if (!tabs.length) return;
+      let active = tabs[0];
+      for (const t of tabs) {
+        const sec = document.getElementById("set-" + t.dataset.tab);
+        if (sec && sec.getBoundingClientRect().top < 220) active = t;
+      }
+      tabs.forEach(t => t.classList.toggle("on", t === active));
+    }, { passive: true });
+  }
+
   const toggleSetting = async (btn, key, onDone) => {
     const was = btn.classList.contains("on");
     const on = !was;
     btn.classList.toggle("on", on);
     btn.setAttribute("aria-checked", String(on));
-
     const next = await bg({ action: "saveSettings", settings: { [key]: on } });
     if (failed(next) || !next) {
       btn.classList.toggle("on", was);
       btn.setAttribute("aria-checked", String(was));
-      toast("Couldn't save that setting — nothing changed");
-      return;
+      return toast("Couldn't save that setting — nothing changed");
     }
     prefs = next;
     onDone?.(on);
   };
 
   el.querySelector("#toggleAutoScan").addEventListener("click", function () {
-    toggleSetting(this, "autoScan", on => {
-      reflectAutoScan();
-      toast(on ? "Auto-scan enabled" : "Auto-scan paused");
-    });
+    toggleSetting(this, "autoScan", on => { reflectAutoScan(); toast(on ? "Auto-scan enabled" : "Auto-scan paused"); });
   });
-
   el.querySelector("#remoteFaviconsToggle").addEventListener("click", function () {
     toggleSetting(this, "remoteFavicons", on => toast(on ? "Remote favicons on" : "Remote favicons off"));
   });
 
-  el.querySelector("#saveLimitsBtn").addEventListener("click", async () => {
+  const saveLimits = async () => {
     const maxScans = parseInt(el.querySelector("#maxScansInput").value, 10);
     const maxContacts = parseInt(el.querySelector("#maxContactsInput").value, 10);
     if (!Number.isInteger(maxScans) || maxScans < 100 || maxScans > 50000) return toast("Max domains must be 100–50,000");
@@ -1568,54 +1722,89 @@ function wireSettings(el, settings) {
     if (failed(next) || !next) return toast("Couldn't save storage limits");
     prefs = next;
     toast("Storage limits saved");
-  });
+  };
+  el.querySelector("#maxScansInput").addEventListener("change", saveLimits);
+  el.querySelector("#maxContactsInput").addEventListener("change", saveLimits);
 
-  el.querySelectorAll(".pat-test-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const input = document.getElementById(btn.dataset.test);
-      const errorEl = document.getElementById(btn.dataset.test + "-error");
-      const result = validateRegex(input.value, "g");
-      errorEl.textContent = result.ok ? "✓ Valid regex" : "✗ " + result.error;
-      errorEl.className = "pat-error " + (result.ok ? "is-ok" : "is-bad");
-      clearTimeout(btn._t);
-      btn._t = setTimeout(() => { errorEl.textContent = ""; errorEl.className = "pat-error"; }, 5000);
-    });
-  });
+  // Tester toggles
+  el.querySelectorAll(".pat-test-btn").forEach(btn => btn.addEventListener("click", () => {
+    const id = btn.dataset.test;
+    const panel = document.getElementById(`test-${id}`);
+    panel.hidden = !panel.hidden;
+    btn.classList.toggle("on", !panel.hidden);
+    if (!panel.hidden) runTester(id);
+  }));
 
   el.querySelector("#addSocialBtn").addEventListener("click", () => {
     const tbody = el.querySelector("#socialTableBody");
     tbody.insertAdjacentHTML("beforeend", socialRowHtml());
-    const row = tbody.lastElementChild;
-    wireRowDelete(row);
-    row.querySelector(".social-platform").focus();
+    wireRowDelete(tbody.lastElementChild);
+    tbody.lastElementChild.querySelector(".social-platform").focus();
     setDirty(true);
   });
 
   el.querySelector("#addCustomBtn").addEventListener("click", () => {
-    el.querySelector("#customTableWrap").hidden = false;
-    const tbody = el.querySelector("#customTableBody");
-    tbody.insertAdjacentHTML("beforeend", customRowHtml());
-    const row = tbody.lastElementChild;
-    wireRowDelete(row);
+    const list = el.querySelector("#customList");
+    const i = list.querySelectorAll(".pc").length;
+    list.insertAdjacentHTML("beforeend", `
+      <div class="pc" data-custom-row="${i}">
+        <div class="pc-hd">
+          <span class="pat-dot" style="background:var(--custom)"></span>
+          <input type="text" class="tbl-input custom-label pc-label" value="" placeholder="Label" aria-label="Custom pattern label">
+          <span class="pc-spacer"></span>
+          <button type="button" class="cell-btn del custom-del" title="Remove" aria-label="Remove pattern">${IC.trash}</button>
+        </div>
+        <div class="pc-body">
+          <div class="pat-input-wrap">
+            <span class="pat-slash">/</span>
+            <input type="text" class="pat-input custom-regex" id="cx-new-${i}" value="" placeholder="Regex pattern" spellcheck="false">
+            <span class="pat-slash">/</span>
+            <input type="text" class="pat-flags custom-flags" id="cx-new-${i}-flags" value="g" spellcheck="false" aria-label="Flags">
+            <button type="button" class="pat-test-btn" data-test="cx-new-${i}">Test</button>
+          </div>
+          ${testerPanel(`cx-new-${i}`)}
+        </div>
+      </div>`);
+    const row = list.lastElementChild;
+    row.querySelector(".custom-del").addEventListener("click", () => { row.remove(); setDirty(true); });
+    row.querySelector(".pat-test-btn").addEventListener("click", () => {
+      const id = row.querySelector(".pat-test-btn").dataset.test;
+      const panel = document.getElementById(`test-${id}`);
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) runTester(id);
+    });
     row.querySelector(".custom-label").focus();
     setDirty(true);
   });
 
-  el.querySelectorAll("#socialTableBody tr, #customTableBody tr").forEach(wireRowDelete);
+  el.querySelectorAll("#socialTableBody tr").forEach(wireRowDelete);
+  el.querySelectorAll(".pc .custom-del").forEach(btn => btn.addEventListener("click", () => {
+    btn.closest(".pc").remove();
+    setDirty(true);
+  }));
 
   el.querySelectorAll(".tag-input").forEach(input => {
-    const commit = () => {
-      const added = commitTagInput(input);
-      if (added) setDirty(true);
-    };
+    const commit = () => { if (commitTagInput(input)) setDirty(true); };
     input.addEventListener("keydown", e => {
       if (e.key === "Enter" || e.key === ",") { e.preventDefault(); commit(); }
     });
-    // Also commit on blur — typing a value and clicking Save used to discard it.
-    input.addEventListener("blur", commit);
+    input.addEventListener("blur", commit);   // typing then clicking Save used to discard it
   });
-
   el.querySelectorAll(".tag-x").forEach(wireTagRemove);
+
+  el.querySelectorAll("[data-reset-list]").forEach(btn => btn.addEventListener("click", () => {
+    const key = btn.dataset.resetList;
+    const container = document.getElementById(btn.dataset.target);
+    const input = container.querySelector(".tag-input");
+    container.querySelectorAll(".tag").forEach(t => t.remove());
+    (PROSPEKT.DEFAULTS[key] || []).forEach(v => {
+      input.insertAdjacentHTML("beforebegin", tagChip(v));
+      wireTagRemove(input.previousElementSibling.querySelector(".tag-x"));
+    });
+    btn.closest(".pat-row").querySelector(".list-count").textContent = num((PROSPEKT.DEFAULTS[key] || []).length);
+    setDirty(true);
+    toast(`${key} restored to defaults — save to apply`);
+  }));
 
   el.querySelector("#savePatternsBtn").addEventListener("click", savePatterns);
   el.querySelector("#discardPatternsBtn").addEventListener("click", () => {
@@ -1632,13 +1821,13 @@ function wireSettings(el, settings) {
     toast("Patterns reset to defaults");
   });
 
+  el.querySelector("#settingsExportContacts").addEventListener("click", () => doExport("contacts"));
+  el.querySelector("#settingsExportScans").addEventListener("click", () => doExport("scans"));
+
   el.querySelector("#dismissWarnBtn")?.addEventListener("click", async () => {
     await bg({ action: "saveSettings", settings: { storageWarning: null } });
     renderPage("settings");
   });
-
-  el.querySelector("#settingsExportContacts").addEventListener("click", () => doExport("contacts"));
-  el.querySelector("#settingsExportScans").addEventListener("click", () => doExport("scans"));
 
   el.querySelector("#clearAllBtn").addEventListener("click", async () => {
     if (!confirm("Delete ALL contacts and scan history? This cannot be undone.")) return;
@@ -1648,13 +1837,129 @@ function wireSettings(el, settings) {
   });
 }
 
+/**
+ * Collect the whole editor. Returns null (and points at the offending field)
+ * rather than silently dropping bad or half-filled rows.
+ */
+function gatherPatterns() {
+  const el = document.getElementById("page-settings");
+  el.querySelectorAll(".is-invalid").forEach(n => n.classList.remove("is-invalid"));
+  el.querySelectorAll(".tag-input").forEach(commitTagInput);   // flush unconfirmed text
+
+  const emailInput = el.querySelector("#pat-email");
+  const phoneInput = el.querySelector("#pat-phone");
+  const emailRegex = emailInput.value.trim();
+  const phoneRegex = phoneInput.value.trim();
+  const emailFlags = el.querySelector("#pat-email-flags").value.trim() || "gi";
+  const phoneFlags = el.querySelector("#pat-phone-flags").value.trim() || "g";
+
+  if (!emailRegex) return flagError("Email regex", emailInput, "cannot be empty");
+  if (!phoneRegex) return flagError("Phone regex", phoneInput, "cannot be empty");
+
+  let check = validateRegex(emailRegex, emailFlags);
+  if (!check.ok) return flagError("Email regex", emailInput, check.error);
+  check = validateRegex(phoneRegex, phoneFlags);
+  if (!check.ok) return flagError("Phone regex", phoneInput, check.error);
+
+  const socialPatterns = [];
+  for (const [i, tr] of [...el.querySelectorAll("#socialTableBody tr")].entries()) {
+    const platformEl = tr.querySelector(".social-platform");
+    const labelEl = tr.querySelector(".social-label");
+    const regexEl = tr.querySelector(".social-regex");
+    const platform = platformEl.value.trim();
+    const label = labelEl.value.trim();
+    const regex = regexEl.value.trim();
+    const flags = tr.querySelector(".social-flags").value.trim() || "gi";
+
+    if (!platform && !label && !regex) continue;      // untouched blank row
+    if (!platform) return flagError(`Social row ${i + 1}`, platformEl, "needs a platform ID");
+    if (!label) return flagError(`Social row ${i + 1}`, labelEl, "needs a label");
+    if (!regex) return flagError(`Social row ${i + 1}`, regexEl, "needs a regex");
+    const r = validateRegex(regex, flags);
+    if (!r.ok) return flagError(`Social “${label}”`, regexEl, r.error);
+    socialPatterns.push({ platform, label, regex, flags });
+  }
+
+  const customPatterns = [];
+  for (const [i, card] of [...el.querySelectorAll("#customList .pc")].entries()) {
+    const labelEl = card.querySelector(".custom-label");
+    const regexEl = card.querySelector(".custom-regex");
+    const label = labelEl.value.trim();
+    const regex = regexEl.value.trim();
+    const flags = card.querySelector(".custom-flags").value.trim() || "g";
+
+    if (!label && !regex) continue;
+    if (!label) return flagError(`Custom pattern ${i + 1}`, labelEl, "needs a label");
+    if (!regex) return flagError(`Custom pattern ${i + 1}`, regexEl, "needs a regex");
+    const r = validateRegex(regex, flags);
+    if (!r.ok) return flagError(`Custom “${label}”`, regexEl, r.error);
+    customPatterns.push({ label, regex, flags });
+  }
+
+  const tags = id => [...el.querySelectorAll(`#${id} .tag`)].map(t => t.dataset.value).filter(Boolean);
+
+  return {
+    emailRegex, emailFlags, phoneRegex, phoneFlags,
+    socialPatterns, customPatterns,
+    skipDomains: tags("skipDomainsTags"),
+    junkEmailDomains: tags("junkDomainsTags"),
+    junkEmailPrefixes: tags("junkPrefixesTags"),
+    junkSocialPaths: tags("junkSocialTags"),
+  };
+}
+
+// ── Settings portability ─────────────────────────────────────────────────
+function setupSettingsIO() {
+  document.getElementById("exportSettingsBtn").addEventListener("click", async () => {
+    const payload = await bg({ action: "exportSettings" });
+    if (!payload) return toast("Export failed");
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "prospekt-settings.json";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 20000);
+    toast("Settings exported");
+  });
+
+  const file = document.getElementById("importFile");
+  document.getElementById("importSettingsBtn").addEventListener("click", () => file.click());
+  file.addEventListener("change", async () => {
+    const f = file.files?.[0];
+    file.value = "";                      // allow re-picking the same file
+    if (!f) return;
+    let payload;
+    try { payload = JSON.parse(await f.text()); }
+    catch { return toast("That file isn't valid JSON"); }
+
+    if (!confirm("Replace your current patterns and scanning settings with this file? Contacts and history are untouched.")) return;
+    const res = await bg({ action: "importSettings", payload });
+    if (!res?.ok) return toast(res?.error || "Import failed");
+    prefs = res.settings;
+    reflectAutoScan();
+    toast("Settings imported");
+    renderPage("settings");
+  });
+}
+
+const tagChip = value =>
+  `<span class="tag" data-value="${esc(value)}">${esc(value)}<button type="button" class="tag-x" aria-label="Remove ${esc(value)}">×</button></span>`;
+
+const socialRowHtml = (sp = {}) => `
+  <tr>
+    <td><input type="text" class="tbl-input social-platform" value="${esc(sp.platform)}" placeholder="platform_id"></td>
+    <td><input type="text" class="tbl-input social-label" value="${esc(sp.label)}" placeholder="Display Name"></td>
+    <td><input type="text" class="tbl-input social-regex" value="${esc(sp.regex)}" placeholder="https?://…" spellcheck="false"></td>
+    <td><input type="text" class="tbl-input social-flags" value="${esc(sp.flags || "gi")}" placeholder="gi" spellcheck="false"></td>
+    <td><button type="button" class="cell-btn del row-del" title="Remove" aria-label="Remove row">${IC.trash}</button></td>
+  </tr>`;
+
+// Social rows only — custom patterns are cards now and own their own delete.
 function wireRowDelete(row) {
   row.querySelector(".row-del")?.addEventListener("click", () => {
-    const tbody = row.parentElement;
     row.remove();
-    if (tbody?.id === "customTableBody" && !tbody.children.length) {
-      document.getElementById("customTableWrap").hidden = true;
-    }
     setDirty(true);
   });
 }
@@ -1692,79 +1997,6 @@ function flagError(field, input, message) {
  * the offending field) rather than silently dropping bad or half-filled rows,
  * which is what made edits look like they "didn't save".
  */
-function gatherPatterns() {
-  const el = document.getElementById("page-settings");
-  el.querySelectorAll(".is-invalid").forEach(n => n.classList.remove("is-invalid"));
-
-  // Flush any tag text the user typed but never confirmed.
-  el.querySelectorAll(".tag-input").forEach(commitTagInput);
-
-  const emailInput = el.querySelector("#pat-email");
-  const phoneInput = el.querySelector("#pat-phone");
-  const emailRegex = emailInput.value.trim();
-  const phoneRegex = phoneInput.value.trim();
-
-  if (!emailRegex) return flagError("Email regex", emailInput, "cannot be empty");
-  if (!phoneRegex) return flagError("Phone regex", phoneInput, "cannot be empty");
-
-  let check = validateRegex(emailRegex, "gi");
-  if (!check.ok) return flagError("Email regex", emailInput, check.error);
-  check = validateRegex(phoneRegex, "g");
-  if (!check.ok) return flagError("Phone regex", phoneInput, check.error);
-
-  const socialPatterns = [];
-  for (const [i, tr] of [...el.querySelectorAll("#socialTableBody tr")].entries()) {
-    const platformEl = tr.querySelector(".social-platform");
-    const labelEl = tr.querySelector(".social-label");
-    const regexEl = tr.querySelector(".social-regex");
-    const flagsEl = tr.querySelector(".social-flags");
-    const platform = platformEl.value.trim();
-    const label = labelEl.value.trim();
-    const regex = regexEl.value.trim();
-    const flags = flagsEl.value.trim() || "gi";
-
-    if (!platform && !label && !regex) continue;      // untouched blank row
-    if (!platform) return flagError(`Social row ${i + 1}`, platformEl, "needs a platform ID");
-    if (!label) return flagError(`Social row ${i + 1}`, labelEl, "needs a label");
-    if (!regex) return flagError(`Social row ${i + 1}`, regexEl, "needs a regex");
-    const r = validateRegex(regex, flags);
-    if (!r.ok) return flagError(`Social "${label}"`, regexEl, r.error);
-    socialPatterns.push({ platform, label, regex, flags });
-  }
-
-  const customPatterns = [];
-  for (const [i, tr] of [...el.querySelectorAll("#customTableBody tr")].entries()) {
-    const labelEl = tr.querySelector(".custom-label");
-    const regexEl = tr.querySelector(".custom-regex");
-    const flagsEl = tr.querySelector(".custom-flags");
-    const label = labelEl.value.trim();
-    const regex = regexEl.value.trim();
-    const flags = flagsEl.value.trim() || "g";
-
-    if (!label && !regex) continue;
-    if (!label) return flagError(`Custom row ${i + 1}`, labelEl, "needs a label");
-    if (!regex) return flagError(`Custom row ${i + 1}`, regexEl, "needs a regex");
-    const r = validateRegex(regex, flags);
-    if (!r.ok) return flagError(`Custom "${label}"`, regexEl, r.error);
-    customPatterns.push({ label, regex, flags });
-  }
-
-  const tags = id => [...el.querySelectorAll(`#${id} .tag`)].map(t => t.dataset.value).filter(Boolean);
-
-  return {
-    emailRegex,
-    emailFlags: "gi",
-    phoneRegex,
-    phoneFlags: "g",
-    socialPatterns,
-    customPatterns,
-    skipDomains: tags("skipDomainsTags"),
-    junkEmailDomains: tags("junkDomainsTags"),
-    junkEmailPrefixes: tags("junkPrefixesTags"),
-    junkSocialPaths: tags("junkSocialTags"),
-  };
-}
-
 async function savePatterns() {
   const patterns = gatherPatterns();
   if (!patterns) return;                    // gatherPatterns already reported why

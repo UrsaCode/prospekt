@@ -65,6 +65,22 @@ PROSPEKT.looksLikeDate = value => {
   return false;
 };
 
+/**
+ * Post-match validation for phone candidates. Shared with the settings tester
+ * so it can show what extraction will actually KEEP, not just what the regex
+ * matched — a tester that overstates is worse than none.
+ */
+PROSPEKT.isValidPhone = raw => {
+  const text = String(raw).trim();
+  const digits = text.replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 15) return false;
+  if (/^(\d)\1+$/.test(digits)) return false;                                  // 0000000
+  if (/^(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(text)) return false;      // 2024-01-15
+  if (/^\d{1,2}[-/.]\d{1,2}[-/.](?:19|20)\d{2}$/.test(text)) return false;      // 15-01-2024
+  if (/^\d+(\.\d+){2,}$/.test(text)) return false;                             // 1.2.3.4
+  return true;
+};
+
 PROSPEKT.isRoleAddress = value => {
   const at = String(value || "").indexOf("@");
   if (at < 1) return false;
@@ -144,6 +160,29 @@ PROSPEKT.LEGACY_DEFAULTS = {
     String.raw`(?:\+?\d{1,4}[\s\-.]?)?\(?\d{1,4}\)?[\s\-.]?\d{1,4}[\s\-.]?\d{1,9}`,
   ],
 };
+
+// Seed text for the pattern tester. Deliberately mixes real-looking contacts
+// with the noise that trips patterns up — a date, a version, an order number —
+// so a regex shows its false positives before it is saved.
+PROSPEKT.SAMPLE_TEXT = `Ursa Code — our team
+
+Dana Okonkwo, Head of Research
+dana.okonkwo@ursacode.com · +1 (415) 555-0184
+linkedin.com/in/dana-okonkwo
+
+Marcus Reyes, Engineering
+m.reyes@ursacode.com · +44 20 7946 0332
+github.com/ursacode · x.com/ursacode
+
+Press: press@ursacode.com · Support: support@ursacode.com
+Careers: careers@ursacode.com (we're hiring)
+
+More patterns to explore at regexhunter.com
+hello@regexhunter.com · github.com/regexhunter
+
+Ticket TCK-40192 · SKU-4471-XB · SKU-9931-AA
+Released 2026-03-14, build 10.15.7, order 1234567
+Revenue $1,234,567 across 9,104 page scans`;
 
 PROSPEKT.clone = value => JSON.parse(JSON.stringify(value));
 

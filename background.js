@@ -188,12 +188,67 @@ const HANDLERS = {
   exportPage: msg => exportPage(msg.tabId).then(csv => ({ csv })),
   getOverview: () => getOverview(),
   getInsights: msg => getInsights(msg?.range),
+  exportSettings: () => exportSettings(),
+  importSettings: msg => serialize(() => importSettings(msg.payload)),
   exportInsights: msg => getInsights(msg?.range).then(i => ({ csv: insightsCsv(i) })),
   deleteContacts: msg => serialize(() => deleteContacts(msg.ids)),
   deleteScans: msg => serialize(() => deleteScans(msg.ids)),
   rescanDomain: msg => rescanDomain(msg.domain),
   exportSelection: msg => exportSelection(msg.ids).then(csv => ({ csv })),
 };
+
+// ── Settings portability ────────────────────────────────────────────────
+// Only configuration travels. Contacts and scan history are deliberately not
+// included: this is for moving a setup between profiles, not for shipping a
+// harvested library somewhere else.
+async function exportSettings() {
+  const d = await get([SETTINGS, PATTERNS]);
+  const settings = { ...DEFAULT_SETTINGS, ...(d[SETTINGS] || {}) };
+  delete settings.lastExportAt;
+  delete settings.storageWarning;
+  return {
+    kind: "prospekt-settings",
+    version: chrome.runtime.getManifest().version,
+    exportedAt: new Date().toISOString(),
+    settings,
+    patterns: PROSPEKT.resolvePatterns(d[PATTERNS]),
+  };
+}
+
+async function importSettings(payload) {
+  if (!payload || payload.kind !== "prospekt-settings") {
+    return { ok: false, error: "That file isn't a Prospekt settings export." };
+  }
+
+  // Validate before writing anything: a half-applied import would be worse
+  // than a rejected one.
+  const problems = [];
+  const p = payload.patterns || {};
+  const check = (source, flags, label) => {
+    try { new RegExp(source, flags); } catch (e) { problems.push(`${label}: ${e.message}`); }
+  };
+  if (p.emailRegex) check(p.emailRegex, p.emailFlags || "gi", "Email regex");
+  if (p.phoneRegex) check(p.phoneRegex, p.phoneFlags || "g", "Phone regex");
+  for (const s of p.socialPatterns || []) check(s.regex, s.flags || "gi", `Social “${s.label || s.platform}”`);
+  for (const c of p.customPatterns || []) check(c.regex, c.flags || "g", `Custom “${c.label}”`);
+  if (problems.length) return { ok: false, error: problems.slice(0, 3).join("; ") };
+
+  const current = await getSettings();
+  const incoming = payload.settings || {};
+  const next = {
+    ...current,
+    autoScan: incoming.autoScan !== undefined ? !!incoming.autoScan : current.autoScan,
+    remoteFavicons: incoming.remoteFavicons !== undefined ? !!incoming.remoteFavicons : current.remoteFavicons,
+    maxScans: clampInt(incoming.maxScans, 100, 50000, current.maxScans),
+    maxContacts: clampInt(incoming.maxContacts, 1000, 200000, current.maxContacts),
+  };
+
+  await set({
+    [SETTINGS]: next,
+    [PATTERNS]: { ...PROSPEKT.resolvePatterns(p), _v: PROSPEKT.PATTERNS_VERSION },
+  });
+  return { ok: true, settings: next };
+}
 
 // ── Insights ────────────────────────────────────────────────────────────
 const RANGES = { "7d": 7, "30d": 30, "12w": 84, all: null };
