@@ -98,7 +98,7 @@ const HANDLERS = {
     await set({ [SETTINGS]: next });
     return next;
   }),
-  openDashboard: () => openDashboard(),
+  openDashboard: msg => openDashboard(msg.hash),
   getPatterns: () => get(PATTERNS).then(d => d[PATTERNS] || null),
   savePatterns: msg => serialize(async () => {
     const patterns = { ...(msg.patterns || {}), _v: PROSPEKT.PATTERNS_VERSION };
@@ -128,18 +128,89 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;   // async response
 });
 
-// Focus an already-open dashboard instead of stacking duplicate tabs.
-async function openDashboard() {
-  const url = chrome.runtime.getURL("dashboard.html");
-  const existing = await chrome.tabs.query({ url });
+// Focus an already-open dashboard instead of stacking duplicate tabs. An
+// optional hash routes it to a page (or triggers an export) on arrival.
+async function openDashboard(hash = "") {
+  const base = chrome.runtime.getURL("dashboard.html");
+  const url = hash ? `${base}#${hash}` : base;
+  const existing = await chrome.tabs.query({ url: base });
   if (existing.length) {
-    await chrome.tabs.update(existing[0].id, { active: true });
+    // Re-navigating an already-open tab won't fire a load for a hash-only
+    // change, so nudge it explicitly.
+    await chrome.tabs.update(existing[0].id, { active: true, url });
     await chrome.windows.update(existing[0].windowId, { focused: true }).catch(() => {});
+    if (hash) {
+      chrome.tabs.sendMessage(existing[0].id, { action: "dashboardRoute", hash }, () => void chrome.runtime.lastError);
+    }
   } else {
     await chrome.tabs.create({ url });
   }
   return { ok: true };
 }
+
+// ── Action context menu (right-click the toolbar icon) ──────────────────
+const MENU = {
+  open: "prospekt_open",
+  scan: "prospekt_scan",
+  pause: "prospekt_pause",
+  settings: "prospekt_settings",
+  export: "prospekt_export",
+};
+
+async function buildMenus() {
+  const settings = await getSettings();
+  await new Promise(resolve => chrome.contextMenus.removeAll(resolve));
+
+  const add = props => chrome.contextMenus.create({ contexts: ["action"], ...props },
+    () => void chrome.runtime.lastError);
+
+  add({ id: MENU.open, title: "Open dashboard" });
+  add({ id: MENU.scan, title: "Scan this page now" });
+  add({ id: "sep1", type: "separator" });
+  add({ id: MENU.pause, title: "Auto-scan", type: "checkbox", checked: settings.autoScan !== false });
+  add({ id: "sep2", type: "separator" });
+  add({ id: MENU.settings, title: "Settings…" });
+  add({ id: MENU.export, title: "Export contacts (CSV)" });
+}
+
+chrome.runtime.onInstalled.addListener(() => { buildMenus().catch(() => {}); });
+chrome.runtime.onStartup.addListener(() => { buildMenus().catch(() => {}); });
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  switch (info.menuItemId) {
+    case MENU.open:
+      openDashboard();
+      break;
+    case MENU.settings:
+      openDashboard("settings");
+      break;
+    case MENU.export:
+      openDashboard("export-contacts");
+      break;
+    case MENU.scan:
+      if (tab?.id) {
+        // Forced: the user asked explicitly, so re-scan even if the URL is unchanged.
+        chrome.tabs.sendMessage(tab.id, { action: "rescan", force: true }, () => void chrome.runtime.lastError);
+      }
+      break;
+    case MENU.pause:
+      serialize(async () => {
+        const current = await getSettings();
+        await set({ [SETTINGS]: { ...current, autoScan: info.checked } });
+      }).catch(() => {});
+      break;
+  }
+});
+
+// Keep the checkbox honest when auto-scan is toggled from the dashboard or popup.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[SETTINGS]) return;
+  const next = changes[SETTINGS].newValue || {};
+  const prev = changes[SETTINGS].oldValue || {};
+  if (next.autoScan === prev.autoScan) return;
+  chrome.contextMenus.update(MENU.pause, { checked: next.autoScan !== false },
+    () => void chrome.runtime.lastError);
+});
 
 // Ask every content script to re-run with the current patterns.
 async function rescanTabs() {

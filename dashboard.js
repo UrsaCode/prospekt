@@ -145,13 +145,34 @@ const domainCell = (domain, favicon) =>
   `<div class="cell-domain">${favCell(domain, favicon)}<span class="domain-text">${esc(domain || "—")}</span></div>`;
 
 // ── Init ─────────────────────────────────────────────────────────────────
+const PAGES = ["overview", "contacts", "scans", "insights", "settings"];
+
+// Lets the action context menu deep-link straight to a page or an export.
+function routeFromHash(hash) {
+  const key = String(hash || location.hash || "").replace(/^#/, "").trim();
+  if (!key) return false;
+  if (key === "export-contacts" || key === "export-scans") {
+    doExport(key === "export-scans" ? "scans" : "contacts");
+    return false;
+  }
+  if (!PAGES.includes(key)) return false;
+  document.querySelector(`.nav-item[data-page="${key}"]`)?.click();
+  return true;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   prefs = { ...PROSPEKT.DEFAULT_SETTINGS, ...(await bg({ action: "getSettings" }) || {}) };
   setupNav();
   setupSearch();
   setupExport();
   reflectAutoScan();
-  renderPage("overview");
+  if (!routeFromHash()) renderPage("overview");
+});
+
+// A hash-only change on an already-open tab doesn't reload the page.
+window.addEventListener("hashchange", () => routeFromHash());
+chrome.runtime.onMessage?.addListener?.(msg => {
+  if (msg?.action === "dashboardRoute") routeFromHash(msg.hash);
 });
 
 function reflectAutoScan() {

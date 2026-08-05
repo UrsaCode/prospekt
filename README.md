@@ -27,6 +27,21 @@ nothing to extract leaves no trace in your library.
 | **Insights** | Analytics — top domains, contact type breakdown, social platform split, custom pattern matches |
 | **Settings** | Auto-scan toggle, storage limits, the full pattern editor, exports, reset & clear |
 
+## Toolbar Icon
+
+**Left-click** opens the popup (live counts + Open Dashboard).
+**Right-click** opens a menu:
+
+| Item | What it does |
+|------|-------------|
+| Open dashboard | Focuses the existing dashboard tab if one is open |
+| Scan this page now | Forces a re-scan of the current tab, even if it was already scanned |
+| Auto-scan ☑ | Pause or resume scanning; stays in sync with the Settings toggle |
+| Settings… | Deep-links straight to the Settings page |
+| Export contacts (CSV) | Downloads the full contact library |
+
+Chrome's own **Options** entry (same menu) also opens the dashboard.
+
 ## Pattern Editor
 
 Everything the extraction engine uses is editable in **Settings**, and saving re-scans
@@ -62,12 +77,23 @@ Every scan is stored with:
 
 ## Installation
 
-1. Download and unzip
-2. `chrome://extensions/` → Enable Developer mode
-3. Click "Load unpacked" → select the `prospekt` folder
+```
+node build.js
+```
+
+Then:
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode** (top right)
+3. Click **Load unpacked** → select `dist/prospekt`
 4. Click the Prospekt icon → "Open Dashboard"
 
-Requires Chrome 111+.
+Requires Chrome 111+. Chrome cannot install the generated `.zip` directly —
+that file is for sharing; unzip it and load the folder.
+
+`build.js` validates the extension before packaging: manifest shape, that every
+referenced file exists, that all JS parses, that `importScripts` resolves, and
+that no HTML/CSS pulls a remote resource.
 
 ## File Structure
 
@@ -82,6 +108,7 @@ prospekt/
 ├── dashboard.css      # Dashboard styles (auto light/dark)
 ├── dashboard.js       # Dashboard logic (5 pages, tables, charts, pattern editor)
 ├── icons/             # Extension icons
+├── build.js           # Validate + stage + zip into dist/
 └── README.md
 ```
 

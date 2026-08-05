@@ -367,10 +367,11 @@
       return true;   // async response
     }
     if (msg?.action === "rescan") {
-      // Not forced: a same-URL nudge is a no-op, so a full page load doesn't
-      // get scanned twice by the initial timer and the navigation hook.
+      // Unforced nudges (the navigation hook) skip a same-URL repeat so a full
+      // page load isn't scanned twice. msg.force means the user asked for it
+      // explicitly via the context menu, so always re-scan.
       loadConfig(err => {
-        if (!err) scheduleScan(600, false);
+        if (!err) scheduleScan(msg.force ? 0 : 600, !!msg.force);
         sendResponse({ ok: !err });
       });
       return true;   // async response
