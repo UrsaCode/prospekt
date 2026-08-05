@@ -7,7 +7,7 @@
 globalThis.PROSPEKT = globalThis.PROSPEKT || {};
 
 // Bump when DEFAULTS change in a way existing users should inherit.
-PROSPEKT.PATTERNS_VERSION = 2;
+PROSPEKT.PATTERNS_VERSION = 3;
 
 PROSPEKT.STORAGE_KEYS = {
   SCANS: "prospekt_scans",
@@ -29,9 +29,12 @@ PROSPEKT.DEFAULTS = {
   emailRegex: String.raw`\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b`,
   emailFlags: "gi",
 
-  // Requires at least one separator between digit groups, so it no longer
-  // matches bare runs of digits (prices, order numbers, ISBNs, timestamps).
-  phoneRegex: String.raw`(?<!\d)(?:\+\d{1,3}[\s.\-]?)?(?:\(\d{2,5}\)|\d{2,5})(?:[\s.\-]\d{2,5}){1,4}(?!\d)`,
+  // Requires at least one separator between digit groups, so it does not match
+  // bare runs of digits (prices, order numbers, ISBNs, timestamps).
+  // The separator class is HORIZONTAL whitespace only. Using \s here let the
+  // pattern span the newlines innerText inserts between blocks, so unrelated
+  // numbers in adjacent table cells fused into one bogus "phone".
+  phoneRegex: String.raw`(?<!\d)(?:\+\d{1,3}[ \t\u00a0.\-]?)?(?:\(\d{2,5}\)|\d{2,5})(?:[ \t\u00a0.\-]\d{2,5}){1,4}(?!\d)`,
   phoneFlags: "g",
 
   socialPatterns: [
@@ -79,11 +82,18 @@ PROSPEKT.DEFAULTS = {
   ],
 };
 
-// Values shipped by v1.0.0. Used to detect fields the user never customised so
-// an upgrade can hand them the improved default without clobbering real edits.
+// Values shipped by earlier versions. Used to detect fields the user never
+// customised so an upgrade can hand them the improved default without
+// clobbering real edits. Newest-first within each list.
 PROSPEKT.LEGACY_DEFAULTS = {
   emailRegex: [String.raw`\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b`],
-  phoneRegex: [String.raw`(?:\+?\d{1,4}[\s\-.]?)?\(?\d{1,4}\)?[\s\-.]?\d{1,4}[\s\-.]?\d{1,9}`],
+  phoneRegex: [
+    // v1.1.0 — separator class used \s, which spanned the newlines innerText
+    // inserts between blocks and fused unrelated numbers into fake phones.
+    String.raw`(?<!\d)(?:\+\d{1,3}[\s.\-]?)?(?:\(\d{2,5}\)|\d{2,5})(?:[\s.\-]\d{2,5}){1,4}(?!\d)`,
+    // v1.0.0 — matched any run of 7+ digits.
+    String.raw`(?:\+?\d{1,4}[\s\-.]?)?\(?\d{1,4}\)?[\s\-.]?\d{1,4}[\s\-.]?\d{1,9}`,
+  ],
 };
 
 PROSPEKT.clone = value => JSON.parse(JSON.stringify(value));

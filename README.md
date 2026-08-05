@@ -9,9 +9,13 @@ A full-featured, privacy-first alternative to Hunter.io ($49+/mo), Snov.io ($39+
 ## How It Works
 
 1. **Install the extension** — that's it
-2. **Browse normally** — Prospekt auto-scans every page in the background
+2. **Browse normally** — Prospekt auto-scans every page in the background, including
+   in-app route changes on single-page apps like LinkedIn, X and GitHub
 3. **Contacts are saved automatically** with full metadata: when they were found, which URL, which domain, page title
 4. **Open the Dashboard** — a full-page SPA with 5 sections, tables, charts, search, filters, and CSV export
+
+Only domains where at least one contact was found are recorded — visiting a page with
+nothing to extract leaves no trace in your library.
 
 ## Dashboard Pages
 
@@ -19,7 +23,7 @@ A full-featured, privacy-first alternative to Hunter.io ($49+/mo), Snov.io ($39+
 |------|-------------|
 | **Overview** | Stat cards, recent contacts table, 7-day scan activity chart |
 | **Contacts** | Paginated table with type filters (All/Emails/Phones/Socials/Customs), global search, copy, open, delete per contact |
-| **Scan History** | Every domain that was scanned with timestamps, per-type counts, delete per domain |
+| **Scan History** | Every domain where contacts were found, with timestamps, per-type counts, delete per domain |
 | **Insights** | Analytics — top domains, contact type breakdown, social platform split, custom pattern matches |
 | **Settings** | Auto-scan toggle, storage limits, the full pattern editor, exports, reset & clear |
 

@@ -12,16 +12,20 @@
   const href = () => window.location.href;
   const hostname = () => window.location.hostname;
 
-  let compiled = null;   // active config
+  let compiled = null;        // active config
   let scanTimer = null;
+  let lastScannedUrl = null;  // lets SPA route re-scans skip no-op repeats
 
   // ── Config ────────────────────────────────────────────────────────────
   function compileRegex(source, flags, fallbackSource, fallbackFlags) {
     try {
       return new RegExp(source, flags);
-    } catch {
-      try { return new RegExp(fallbackSource, fallbackFlags); } catch { return null; }
-    }
+    } catch { /* fall through */ }
+    // No fallback means "drop this pattern". Passing undefined on to RegExp
+    // would NOT throw — new RegExp(undefined) is /(?:)/, which matches the
+    // empty string at every position and floods the results with blanks.
+    if (fallbackSource === undefined || fallbackSource === null) return null;
+    try { return new RegExp(fallbackSource, fallbackFlags); } catch { return null; }
   }
 
   function compile(storedPatterns, storedSettings) {
@@ -301,9 +305,13 @@
     }
   }
 
-  function scan() {
+  function scan(force) {
     if (!compiled || compiled.settings.autoScan === false) return;
     if (isSkipped(compiled)) return;
+    // A same-document navigation that didn't actually change the URL (or a
+    // duplicate rescan nudge) is not worth re-walking the DOM for.
+    if (!force && lastScannedUrl === href()) return;
+    lastScannedUrl = href();
 
     let payload;
     try { payload = collect(compiled); }
@@ -316,40 +324,56 @@
     send({ action: "storeScan", data: payload });
   }
 
-  function loadConfig(then) {
+  // Always invokes `then`, with an error if the read failed. Returning early on
+  // lastError left the initial scan unscheduled for the tab's whole lifetime
+  // and hung manualScan's response channel open until it timed out.
+  function loadConfig(then, attempt = 0) {
     chrome.storage.local.get([STORAGE_KEYS.PATTERNS, STORAGE_KEYS.SETTINGS], data => {
-      if (chrome.runtime.lastError) return;
+      const err = chrome.runtime.lastError;
+      if (err) {
+        if (attempt < 2) {
+          setTimeout(() => loadConfig(then, attempt + 1), 400 * (attempt + 1));
+          return;
+        }
+        if (then) then(new Error(err.message));
+        return;
+      }
       compiled = compile(data[STORAGE_KEYS.PATTERNS], data[STORAGE_KEYS.SETTINGS]);
-      if (then) then();
+      if (then) then(null);
     });
   }
 
-  function scheduleScan(delay) {
+  function scheduleScan(delay, force) {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(scan, delay);
+    scanTimer = setTimeout(() => scan(force), delay);
   }
 
-  loadConfig(() => scheduleScan(1500));
+  loadConfig(err => { if (!err) scheduleScan(1500, true); });
 
   // Live config updates: a pattern saved in the dashboard re-scans open tabs.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (!changes[STORAGE_KEYS.PATTERNS] && !changes[STORAGE_KEYS.SETTINGS]) return;
-    loadConfig(() => scheduleScan(200));
+    loadConfig(err => { if (!err) scheduleScan(200, true); });   // patterns changed — force
   });
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.action === "manualScan") {
-      loadConfig(() => {
+      loadConfig(err => {
+        if (err || !compiled) return sendResponse({ error: err ? err.message : "config unavailable" });
         try { sendResponse(collect(compiled)); }
-        catch (err) { sendResponse({ error: String(err?.message || err) }); }
+        catch (e) { sendResponse({ error: String(e?.message || e) }); }
       });
       return true;   // async response
     }
     if (msg?.action === "rescan") {
-      loadConfig(() => scheduleScan(0));
-      sendResponse({ ok: true });
-      return false;
+      // Not forced: a same-URL nudge is a no-op, so a full page load doesn't
+      // get scanned twice by the initial timer and the navigation hook.
+      loadConfig(err => {
+        if (!err) scheduleScan(600, false);
+        sendResponse({ ok: !err });
+      });
+      return true;   // async response
     }
     return false;    // let other listeners respond
   });

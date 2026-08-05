@@ -67,8 +67,13 @@ function migratePatterns(stored, reason) {
   }
   // v1 had no per-pattern flags; keep old behaviour explicit rather than
   // silently changing how a user's saved patterns match.
-  next.socialPatterns = (next.socialPatterns || []).map(p => ({ flags: "gi", ...p }));
-  next.customPatterns = (next.customPatterns || []).map(p => ({ flags: "gi", ...p }));
+  // Only touch keys that are actually present: resolvePatterns treats "absent"
+  // as "use defaults" but "[]" as "the user emptied this on purpose", so
+  // defaulting a missing key to [] here would permanently disable extraction.
+  for (const key of ["socialPatterns", "customPatterns"]) {
+    if (!Array.isArray(next[key])) continue;
+    next[key] = next[key].map(p => ({ flags: "gi", ...p }));
+  }
   next._v = PROSPEKT.PATTERNS_VERSION;
   return next;
 }
@@ -150,6 +155,30 @@ async function rescanTabs() {
   })));
   return { ok: true, notified };
 }
+
+// ── Same-document navigation ────────────────────────────────────────────
+// The content script runs once at document_idle. On single-page apps —
+// LinkedIn, X, GitHub, exactly what this targets — every later route change is
+// a same-document navigation that never re-triggers it, so only the first page
+// a user landed on was ever scanned. A content script can't hook the page's own
+// history.pushState (isolated world), so the tab event is the reliable signal.
+const navTimers = new Map();
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url || !/^https?:/i.test(changeInfo.url)) return;
+  clearTimeout(navTimers.get(tabId));
+  navTimers.set(tabId, setTimeout(() => {
+    navTimers.delete(tabId);
+    try {
+      chrome.tabs.sendMessage(tabId, { action: "rescan" }, () => void chrome.runtime.lastError);
+    } catch { /* tab closed or no content script */ }
+  }, 1500));
+});
+
+chrome.tabs.onRemoved.addListener(tabId => {
+  clearTimeout(navTimers.get(tabId));
+  navTimers.delete(tabId);
+});
 
 // ── Badge ───────────────────────────────────────────────────────────────
 function setBadge(tab, count) {
@@ -286,15 +315,36 @@ async function storeScan(data, tab) {
   try {
     await set({ [SCANS]: scans, [CONTACTS]: pruned });
   } catch (err) {
-    // Almost always QUOTA_BYTES. Shed the oldest half and retry once so the
-    // extension degrades instead of silently going read-only.
+    // Almost always QUOTA_BYTES. Shed the oldest half of BOTH tables and retry
+    // so the extension degrades instead of silently going read-only. Trimming
+    // only contacts left an oversized scans array able to fail the retry too.
     console.warn("[Prospekt] storage write failed, trimming:", err.message);
-    const trimmed = pruned.slice(0, Math.floor(pruned.length / 2));
-    await set({ [SCANS]: scans, [CONTACTS]: trimmed });
+    const keptContacts = pruned.slice(0, Math.floor(pruned.length / 2));
+    const keptScans = scans.slice(0, Math.max(1, Math.floor(scans.length / 2)));
+    await set({ [SCANS]: keptScans, [CONTACTS]: keptContacts });
+    // Surface it: silently halving someone's library with only a console.warn
+    // looks like data loss with no cause.
+    await recordStorageWarning({
+      at: now,
+      reason: err.message,
+      droppedContacts: pruned.length - keptContacts.length,
+      droppedScans: scans.length - keptScans.length,
+    });
   }
 
   await setBadge(tab, data.totalContacts);
   return { ok: true, isNew, newContacts: newContacts.length, scanId };
+}
+
+// Stored on settings so the dashboard can show a banner. Best-effort: if even
+// this write fails there is nothing further to do.
+async function recordStorageWarning(warning) {
+  try {
+    const current = await getSettings();
+    await set({ [SETTINGS]: { ...current, storageWarning: warning } });
+  } catch (err) {
+    console.warn("[Prospekt] could not record storage warning:", err.message);
+  }
 }
 
 function clampInt(value, min, max, fallback) {
@@ -316,8 +366,15 @@ async function getScans(filters = {}) {
       (s.found_at?.siteName || "").toLowerCase().includes(q) ||
       (s.found_at?.url || "").toLowerCase().includes(q));
   }
-  if (filters.limit) scans = scans.slice(0, filters.limit);
-  return scans;
+  // Page here for the same reason getContacts does: shipping up to maxScans
+  // records with full metadata across the message channel to render 30 rows
+  // is pure waste.
+  const total = scans.length;
+  if (filters.limit) {
+    const offset = Math.max(0, filters.offset || 0);
+    scans = scans.slice(offset, offset + filters.limit);
+  }
+  return { items: scans, total };
 }
 
 async function getContacts(filters = {}) {

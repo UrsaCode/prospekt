@@ -573,6 +573,25 @@ button { font: inherit; color: inherit; }
 
 .settings-footer { text-align: center; padding: 18px; font-size: 11px; color: var(--text-muted); max-width: 900px; }
 
+/* ── Banners ────────────────────────────────────────── */
+
+.banner {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  max-width: 900px;
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  font-size: 12px; line-height: 1.6;
+}
+.banner strong { font-weight: 700; }
+.banner .btn { margin-left: auto; }
+.banner-warn {
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 34%, transparent);
+  color: var(--text-primary);
+}
+.banner-warn strong { color: var(--amber); }
+
 /* ── Pattern editor ─────────────────────────────────── */
 
 .pat-intro { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.6; }

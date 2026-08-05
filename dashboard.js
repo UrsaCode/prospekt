@@ -43,20 +43,26 @@ function safeUrl(url) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+// Resolves `undefined` when the message itself failed, and whatever the handler
+// returned (including null) when it succeeded. Callers that would otherwise
+// mistake "the worker is unreachable" for "there is nothing stored" — and then
+// save defaults over real data — depend on being able to tell them apart.
 const bg = msg => new Promise(resolve => {
   try {
     chrome.runtime.sendMessage(msg, res => {
       if (chrome.runtime.lastError) {
         console.warn("[Prospekt]", msg.action, chrome.runtime.lastError.message);
-        return resolve(null);
+        return resolve(undefined);
       }
       resolve(res);
     });
   } catch (err) {
     console.warn("[Prospekt]", msg.action, err);
-    resolve(null);
+    resolve(undefined);
   }
 });
+
+const failed = res => res === undefined || res?.ok === false;
 
 const timeAgo = iso => {
   if (!iso) return "—";
@@ -419,19 +425,27 @@ const emptyState = (icon, title, body) =>
 // ══════════════════════════════════════════════════════════════════════════
 async function renderScans() {
   const el = document.getElementById("page-scans");
-  const filters = {};
+  const filters = { limit: PER_PAGE, offset: (state.scanPage - 1) * PER_PAGE };
   if (state.search) filters.search = state.search;
 
-  const all = await bg({ action: "getScans", filters }) || [];
-  const total = all.length;
+  let res = await bg({ action: "getScans", filters });
+  let total = res?.total || 0;
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
-  if (state.scanPage > pages) state.scanPage = pages;
+
+  // Deleting or filtering can strand us past the last page.
+  if (state.scanPage > pages) {
+    state.scanPage = pages;
+    filters.offset = (pages - 1) * PER_PAGE;
+    res = await bg({ action: "getScans", filters });
+    total = res?.total || 0;
+  }
+
+  const rows = res?.items || [];
   const start = (state.scanPage - 1) * PER_PAGE;
-  const rows = all.slice(start, start + PER_PAGE);
 
   el.innerHTML = `
     <div class="page-toolbar">
-      <div class="toolbar-meta">${num(total)} domain${total === 1 ? "" : "s"} scanned</div>
+      <div class="toolbar-meta">${num(total)} domain${total === 1 ? "" : "s"} with contacts</div>
       <button type="button" class="btn btn-accent btn-sm" id="exportScansBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Export Scans
@@ -439,7 +453,7 @@ async function renderScans() {
     </div>
 
     ${total === 0 ? emptyState("🕐", "No scans yet",
-        state.search ? "Nothing matches that search." : "Browse websites normally — Prospekt scans every page in the background.") : `
+        state.search ? "Nothing matches that search." : "Browse websites normally — a domain is listed here once Prospekt finds at least one contact on it.") : `
     <div class="table-wrap">
       <table class="data-table">
         <thead>
@@ -598,10 +612,20 @@ function setDirty(dirty) {
 
 async function renderSettings() {
   const el = document.getElementById("page-settings");
+  const storedPatterns = await bg({ action: "getPatterns" });
+  // `undefined` means the request failed, not that nothing is stored. Rendering
+  // defaults here would let the next Save silently overwrite the user's real
+  // patterns with them.
+  if (storedPatterns === undefined) {
+    el.innerHTML = emptyState("⚠️", "Couldn't load your settings",
+      "The extension's background worker didn't respond. Reload this page to try again — nothing has been changed.");
+    return;
+  }
+
   const settings = { ...PROSPEKT.DEFAULT_SETTINGS, ...(await bg({ action: "getSettings" }) || {}) };
   prefs = settings;
   const stats = { ...EMPTY_STATS, ...(await bg({ action: "getStats" }) || {}) };
-  const P = PROSPEKT.resolvePatterns(await bg({ action: "getPatterns" }));
+  const P = PROSPEKT.resolvePatterns(storedPatterns);
   const D = PROSPEKT.DEFAULTS;
 
   const regexRow = (id, label, value, placeholder) => `
@@ -629,7 +653,18 @@ async function renderSettings() {
   const customRows = (P.customPatterns || []).map(cp => customRowHtml(cp)).join("");
   const hasCustoms = (P.customPatterns || []).length > 0;
 
+  const warn = settings.storageWarning;
+  const warningBanner = warn ? `
+    <div class="banner banner-warn">
+      <strong>Storage limit reached on ${esc(fullDate(warn.at))}.</strong>
+      Prospekt dropped ${num(warn.droppedContacts)} older contact${warn.droppedContacts === 1 ? "" : "s"}
+      and ${num(warn.droppedScans)} scan record${warn.droppedScans === 1 ? "" : "s"} to keep working.
+      Export your data and lower the limits below to avoid this.
+      <button type="button" class="btn btn-ghost btn-sm" id="dismissWarnBtn">Dismiss</button>
+    </div>` : "";
+
   el.innerHTML = `
+    ${warningBanner}
     <div class="settings-group">
       <h3>Scanning</h3>
       <div class="setting-row">
@@ -769,12 +804,23 @@ function wireSettings(el, settings) {
     });
   }
 
+  // The optimistic flip is reverted if the save fails. Previously the error
+  // envelope ({ok:false, error}) was truthy, so it was assigned straight into
+  // `prefs` — wiping every real setting — and the success toast still fired.
   const toggleSetting = async (btn, key, onDone) => {
-    const on = !btn.classList.contains("on");
+    const was = btn.classList.contains("on");
+    const on = !was;
     btn.classList.toggle("on", on);
     btn.setAttribute("aria-checked", String(on));
+
     const next = await bg({ action: "saveSettings", settings: { [key]: on } });
-    if (next) prefs = next;
+    if (failed(next) || !next) {
+      btn.classList.toggle("on", was);
+      btn.setAttribute("aria-checked", String(was));
+      toast("Couldn't save that setting — nothing changed");
+      return;
+    }
+    prefs = next;
     onDone?.(on);
   };
 
@@ -795,7 +841,8 @@ function wireSettings(el, settings) {
     if (!Number.isInteger(maxScans) || maxScans < 100 || maxScans > 50000) return toast("Max domains must be 100–50,000");
     if (!Number.isInteger(maxContacts) || maxContacts < 1000 || maxContacts > 200000) return toast("Max contacts must be 1,000–200,000");
     const next = await bg({ action: "saveSettings", settings: { maxScans, maxContacts } });
-    if (next) prefs = next;
+    if (failed(next) || !next) return toast("Couldn't save storage limits");
+    prefs = next;
     toast("Storage limits saved");
   });
 
@@ -859,6 +906,11 @@ function wireSettings(el, settings) {
     setDirty(false);
     await renderSettings();
     toast("Patterns reset to defaults");
+  });
+
+  el.querySelector("#dismissWarnBtn")?.addEventListener("click", async () => {
+    await bg({ action: "saveSettings", settings: { storageWarning: null } });
+    renderPage("settings");
   });
 
   el.querySelector("#settingsExportContacts").addEventListener("click", () => doExport("contacts"));
