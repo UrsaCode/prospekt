@@ -3,7 +3,7 @@
 
 importScripts("defaults.js");
 
-const { SCANS, CONTACTS, SETTINGS, PATTERNS, BARREN, METERS } = PROSPEKT.STORAGE_KEYS;
+const { SCANS, CONTACTS, SETTINGS, PATTERNS, METERS } = PROSPEKT.STORAGE_KEYS;
 const DEFAULT_SETTINGS = PROSPEKT.DEFAULT_SETTINGS;
 
 // ── Storage helpers (surface errors instead of failing silently) ────────
@@ -187,10 +187,39 @@ const HANDLERS = {
   unskipDomain: msg => serialize(() => setDomainSkipped(msg.domain, false)),
   exportPage: msg => exportPage(msg.tabId).then(csv => ({ csv })),
   getOverview: () => getOverview(),
-  getBarren: msg => getBarren(msg?.limit),
   deleteContacts: msg => serialize(() => deleteContacts(msg.ids)),
+  deleteScans: msg => serialize(() => deleteScans(msg.ids)),
+  rescanDomain: msg => rescanDomain(msg.domain),
   exportSelection: msg => exportSelection(msg.ids).then(csv => ({ csv })),
 };
+
+async function deleteScans(ids) {
+  const wanted = new Set(ids || []);
+  if (!wanted.size) return { ok: false, reason: "no_ids" };
+  const d = await get([SCANS, CONTACTS]);
+  const scans = (d[SCANS] || []).filter(s => !wanted.has(s.id));
+  const contacts = (d[CONTACTS] || []).filter(c => !wanted.has(c.scanId));
+  await set({ [SCANS]: scans, [CONTACTS]: contacts });
+  return { ok: true, removed: (d[SCANS] || []).length - scans.length };
+}
+
+/**
+ * Re-scan every open tab on a domain. Deliberately does NOT navigate anywhere:
+ * opening a site the user isn't looking at would be a surprising side effect of
+ * a button in a history table.
+ */
+async function rescanDomain(domain) {
+  const clean = String(domain || "").toLowerCase().replace(/^www\./, "");
+  if (!clean) return { ok: false, reason: "no_domain" };
+  const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+  const matching = tabs.filter(t => {
+    try { return new URL(t.url).hostname.replace(/^www\./, "").toLowerCase() === clean; }
+    catch { return false; }
+  });
+  if (!matching.length) return { ok: true, notified: 0, reason: "no_open_tab" };
+  await Promise.all(matching.map(t => rescanTab(t.id, { force: true, bypass: true })));
+  return { ok: true, notified: matching.length };
+}
 
 async function deleteContacts(ids) {
   const wanted = new Set(ids || []);
@@ -220,10 +249,9 @@ async function exportSelection(ids) {
 // One call rather than five round trips, each of which would re-read and
 // re-serialise the whole contacts array.
 async function getOverview() {
-  const d = await get([SCANS, CONTACTS, SETTINGS, BARREN, METERS]);
+  const d = await get([SCANS, CONTACTS, SETTINGS, METERS]);
   const scans = Array.isArray(d[SCANS]) ? d[SCANS] : [];
   const contacts = Array.isArray(d[CONTACTS]) ? d[CONTACTS] : [];
-  const barren = Array.isArray(d[BARREN]) ? d[BARREN] : [];
   const settings = { ...DEFAULT_SETTINGS, ...(d[SETTINGS] || {}) };
   const meters = d[METERS] || { pagesScanned: 0, pagesProductive: 0 };
 
@@ -297,18 +325,13 @@ async function getOverview() {
       neverExported,
       lastExportAt: exportedBefore,
       roleAddresses,
-      barrenDomains: barren.length,
+      barrenDomains: scans.filter(isDry).length,
     },
     totalScans: scans.reduce((sum, s) => sum + (s.scan_count || 1), 0),
     autoScan: settings.autoScan !== false,
   };
 }
 
-async function getBarren(limit = 200) {
-  const d = await get(BARREN);
-  const list = Array.isArray(d[BARREN]) ? d[BARREN] : [];
-  return { items: list.slice(0, limit), total: list.length };
-}
 
 // ── Popup model ─────────────────────────────────────────────────────────
 async function activeTab() {
@@ -604,43 +627,48 @@ async function storeScan(data, tab) {
   // just never enters the library. Without this the background cannot tell
   // "scanned, found nothing" from "never scanned", and the empty state would be
   // a guess rather than a fact.
-  if (data.totalContacts === 0) {
-    await recordBarren(domain, now, settings);
-    await bumpMeters({ scanned: 1, productive: 0 });
-    await writePageState(tab?.id, buildPageState(data, counts, [], 0));
-    await setBadge(tab, 0);
-    return { ok: true, empty: true, newContacts: 0 };
-  }
+  await bumpMeters({ scanned: 1, productive: data.totalContacts > 0 ? 1 : 0 });
 
-  await clearBarren(domain);
-  await bumpMeters({ scanned: 1, productive: 1 });
-
+  // Every scanned domain gets a record now, including ones that yield nothing.
+  // The Scan history view lists dry domains with their page counts, and keeping
+  // a second "barren" list alongside these records meant two sources of truth
+  // for the same fact. Dry is simply `counts.total === 0 && !pagesProductive`.
   const existingIdx = scans.findIndex(s => s?.found_at?.domain === domain);
   let scanId;
   let isNew = false;
+  let record;
 
   if (existingIdx !== -1) {
-    const existing = scans[existingIdx];
-    scanId = existing.id;
-    existing.last_scanned_at = now;
-    existing.scan_count = (existing.scan_count || 1) + 1;
-    existing.found_at.url = data.meta.url;
-    existing.found_at.path = data.meta.path;
-    existing.found_at.pageTitle = data.meta.pageTitle;
-    existing.found_at.siteName = data.meta.siteName || existing.found_at.siteName;
-    existing.found_at.favicon = data.meta.favicon || existing.found_at.favicon;
-    existing.emailPattern = data.emailPattern || existing.emailPattern;
-    existing.counts = counts;
+    record = scans[existingIdx];
+    scanId = record.id;
+    record.found_at.url = data.meta.url;
+    record.found_at.path = data.meta.path;
+    record.found_at.pageTitle = data.meta.pageTitle;
+    record.found_at.siteName = data.meta.siteName || record.found_at.siteName;
+    record.found_at.favicon = data.meta.favicon || record.found_at.favicon;
+    record.emailPattern = data.emailPattern || record.emailPattern;
+    // Running totals across the domain, not just this page.
+    record.counts = {
+      emails: (record.counts?.emails || 0),
+      phones: (record.counts?.phones || 0),
+      socials: (record.counts?.socials || 0),
+      customs: (record.counts?.customs || 0),
+      total: (record.counts?.total || 0),
+    };
     scans.splice(existingIdx, 1);
-    scans.unshift(existing);
+    scans.unshift(record);
   } else {
     scanId = `scan_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     isNew = true;
-    scans.unshift({
+    record = {
       id: scanId,
       added_at: now,
       last_scanned_at: now,
-      scan_count: 1,
+      scan_count: 0,
+      pagesScanned: 0,
+      pagesProductive: 0,
+      pageHashes: [],
+      topPages: [],
       found_at: {
         url: data.meta.url,
         domain,
@@ -650,8 +678,20 @@ async function storeScan(data, tab) {
         favicon: data.meta.favicon,
       },
       emailPattern: data.emailPattern,
-      counts,
-    });
+      counts: { emails: 0, phones: 0, socials: 0, customs: 0, total: 0 },
+    };
+    scans.unshift(record);
+  }
+
+  foldPage(record, data.meta, data.totalContacts, now);
+
+  if (data.totalContacts === 0) {
+    const maxDry = clampInt(settings.maxScans, 100, 50000, DEFAULT_SETTINGS.maxScans);
+    if (scans.length > maxDry) scans.length = maxDry;
+    await set({ [SCANS]: scans });
+    await writePageState(tab?.id, buildPageState(data, counts, [], 0));
+    await setBadge(tab, 0);
+    return { ok: true, empty: true, newContacts: 0 };
   }
 
   const maxScans = clampInt(settings.maxScans, 100, 50000, DEFAULT_SETTINGS.maxScans);
@@ -740,6 +780,19 @@ async function storeScan(data, tab) {
 
   contacts.unshift(...newContacts);
 
+  // Recompute the domain's totals from the library rather than accumulating,
+  // so deletions and the contact cap can never leave the record overstating.
+  const domainTotals = { emails: 0, phones: 0, socials: 0, customs: 0, total: 0 };
+  for (const c of contacts) {
+    if (c.found_at?.domain !== domain) continue;
+    domainTotals.total++;
+    if (c.type === "email") domainTotals.emails++;
+    else if (c.type === "phone") domainTotals.phones++;
+    else if (c.type === "social") domainTotals.socials++;
+    else if (c.type === "custom") domainTotals.customs++;
+  }
+  record.counts = domainTotals;
+
   // Cap contacts too. v1 capped scans but let contacts grow without limit until
   // chrome.storage.local hit its quota and every write started failing.
   const maxContacts = clampInt(settings.maxContacts, 1000, 200000, DEFAULT_SETTINGS.maxContacts);
@@ -788,29 +841,59 @@ async function recordStorageWarning(warning) {
   }
 }
 
-// ── Barren domains + meters ─────────────────────────────────────────────
-async function recordBarren(domain, now, settings) {
-  const d = await get(BARREN);
-  const list = Array.isArray(d[BARREN]) ? d[BARREN] : [];
-  const idx = list.findIndex(b => b.domain === domain);
-  if (idx !== -1) {
-    list[idx].attempts = (list[idx].attempts || 1) + 1;
-    list[idx].lastSeen = now;
-    list.unshift(list.splice(idx, 1)[0]);
-  } else {
-    list.unshift({ domain, attempts: 1, firstSeen: now, lastSeen: now });
+// ── Per-domain page tracking ────────────────────────────────────────────
+// Distinct pages are counted by storing a short hash per URL rather than the
+// URL itself: a domain can span hundreds of pages, and full URLs would dominate
+// the storage quota. Titles are kept only for pages that actually produced
+// something, capped, because that is all the drawer shows.
+const MAX_PAGE_HASHES = 600;
+const MAX_TOP_PAGES = 25;
+
+function urlHash(url) {
+  let h = 0x811c9dc5;
+  const s = String(url || "");
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
   }
-  const max = clampInt(settings?.maxBarren, 100, 50000, DEFAULT_SETTINGS.maxBarren);
-  if (list.length > max) list.length = max;
-  await set({ [BARREN]: list });
+  return h.toString(36);
 }
 
-// A domain that produces something is no longer barren.
-async function clearBarren(domain) {
-  const d = await get(BARREN);
-  const list = Array.isArray(d[BARREN]) ? d[BARREN] : [];
-  if (!list.some(b => b.domain === domain)) return;
-  await set({ [BARREN]: list.filter(b => b.domain !== domain) });
+/**
+ * Fold one page scan into a domain's record. Returns the record so the caller
+ * can decide where it belongs in the list.
+ */
+function foldPage(record, meta, contactCount, now) {
+  const hash = urlHash(meta.url);
+  if (!Array.isArray(record.pageHashes)) record.pageHashes = [];
+  const firstVisit = !record.pageHashes.includes(hash);
+
+  if (firstVisit) {
+    record.pagesScanned = (record.pagesScanned || 0) + 1;
+    if (record.pageHashes.length < MAX_PAGE_HASHES) record.pageHashes.push(hash);
+  }
+
+  if (contactCount > 0) {
+    if (!Array.isArray(record.topPages)) record.topPages = [];
+    const existing = record.topPages.find(p => p.h === hash);
+    if (existing) {
+      existing.n = Math.max(existing.n, contactCount);
+      existing.t = meta.pageTitle || existing.t;
+    } else {
+      // Counted the first time a given page produces anything — not on first
+      // visit, since a page can yield nothing today and something tomorrow.
+      record.pagesProductive = (record.pagesProductive || 0) + 1;
+      record.topPages.push({ h: hash, t: meta.pageTitle || meta.url, n: contactCount });
+      record.topPages.sort((a, b) => b.n - a.n);
+      if (record.topPages.length > MAX_TOP_PAGES) record.topPages.length = MAX_TOP_PAGES;
+    }
+    // Can never exceed the pages actually seen (topPages eviction could drift).
+    if (record.pagesProductive > record.pagesScanned) record.pagesProductive = record.pagesScanned;
+  }
+
+  record.last_scanned_at = now;
+  record.scan_count = (record.scan_count || 0) + 1;
+  return record;
 }
 
 async function bumpMeters({ scanned = 0, productive = 0 }) {
@@ -828,9 +911,39 @@ function clampInt(value, min, max, fallback) {
 }
 
 // ── Queries ─────────────────────────────────────────────────────────────
+/** A domain that has been scanned but has never produced a single contact. */
+const isDry = s => !(s?.counts?.total > 0);
+
+const yieldRate = s => {
+  const seen = s?.pagesScanned || 0;
+  return seen ? Math.round(((s.pagesProductive || 0) / seen) * 1000) / 10 : 0;
+};
+
 async function getScans(filters = {}) {
-  const d = await get(SCANS);
-  let scans = Array.isArray(d[SCANS]) ? d[SCANS] : [];
+  const d = await get([SCANS, PATTERNS, SETTINGS]);
+  const patterns = PROSPEKT.resolvePatterns(d[PATTERNS]);
+  const settings = { ...DEFAULT_SETTINGS, ...(d[SETTINGS] || {}) };
+  let scans = (Array.isArray(d[SCANS]) ? d[SCANS] : []).map(s => ({
+    ...s,
+    dry: isDry(s),
+    skipped: PROSPEKT.isSkipped(`https://${s.found_at?.domain || ""}/`, patterns.skipDomains),
+    yieldRate: yieldRate(s),
+    pagesScanned: s.pagesScanned || s.scan_count || 0,
+    pagesProductive: s.pagesProductive || 0,
+  }));
+
+  // Counted before the state filter so the chips stay switchable.
+  const stateCounts = {
+    all: scans.length,
+    yielding: scans.filter(s => !s.dry).length,
+    dry: scans.filter(s => s.dry && !s.skipped).length,
+    skipped: scans.filter(s => s.skipped).length,
+  };
+
+  if (filters.state === "yielding") scans = scans.filter(s => !s.dry);
+  else if (filters.state === "dry") scans = scans.filter(s => s.dry && !s.skipped);
+  else if (filters.state === "skipped") scans = scans.filter(s => s.skipped);
+
   if (filters.domain) scans = scans.filter(s => s.found_at?.domain === filters.domain);
   if (filters.search) {
     const q = String(filters.search).toLowerCase();
@@ -840,15 +953,41 @@ async function getScans(filters = {}) {
       (s.found_at?.siteName || "").toLowerCase().includes(q) ||
       (s.found_at?.url || "").toLowerCase().includes(q));
   }
+  const SORTS = {
+    contacts: (a, b) => (b.counts?.total || 0) - (a.counts?.total || 0),
+    pages: (a, b) => (b.pagesScanned || 0) - (a.pagesScanned || 0),
+    yield: (a, b) => b.yieldRate - a.yieldRate,
+    recent: (a, b) => String(b.last_scanned_at || b.added_at).localeCompare(String(a.last_scanned_at || a.added_at)),
+    domain: (a, b) => String(a.found_at?.domain).localeCompare(String(b.found_at?.domain)),
+  };
+  scans = [...scans].sort(SORTS[filters.sort] || SORTS.contacts);
+
   // Page here for the same reason getContacts does: shipping up to maxScans
   // records with full metadata across the message channel to render 30 rows
-  // is pure waste.
+  // is pure waste. pageHashes in particular are large and never rendered.
   const total = scans.length;
   if (filters.limit) {
     const offset = Math.max(0, filters.offset || 0);
     scans = scans.slice(offset, offset + filters.limit);
   }
-  return { items: scans, total };
+  scans = scans.map(({ pageHashes, ...rest }) => rest);
+
+  const meters = (await get(METERS))[METERS] || {};
+  return {
+    items: scans,
+    total,
+    stateCounts,
+    summary: {
+      pagesScanned: meters.pagesScanned || 0,
+      domainsYielding: stateCounts.yielding,
+      domainsTotal: stateCounts.all,
+      dryDomains: stateCounts.dry,
+      recordsUsed: stateCounts.all,
+      recordsMax: clampInt(settings.maxScans, 100, 50000, DEFAULT_SETTINGS.maxScans),
+      since: (Array.isArray(d[SCANS]) ? d[SCANS] : []).reduce(
+        (min, s) => (!min || (s.added_at && s.added_at < min) ? (s.added_at || min) : min), null),
+    },
+  };
 }
 
 /** Normalised identity used only to spot the same value across domains. */

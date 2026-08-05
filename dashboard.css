@@ -292,6 +292,7 @@ button { font: inherit; color: inherit; }
 .tone-cyan   { color: var(--cyan); }
 .tone-red    { color: var(--red); }
 .tone-muted  { color: var(--text-muted); }
+.tone-phone  { color: var(--phone); }
 
 .tone-bg-accent { background: var(--accent); }
 .tone-bg-purple { background: var(--purple); }
@@ -763,6 +764,49 @@ td.cell-check, th.cell-check { width: 38px; padding-left: 16px; }
 .badge-role { background: color-mix(in srgb, var(--phone) 18%, transparent); color: var(--phone); }
 .badge-dup { background: color-mix(in srgb, var(--social) 18%, transparent); color: var(--social); }
 
+/* ── Scan history ───────────────────────────────────── */
+
+.sh-strip {
+  display: grid; grid-template-columns: repeat(3, 1fr) 1.6fr;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  margin-bottom: 16px;
+}
+.sh-cell { padding: 16px 20px; border-right: 1px solid var(--border); }
+.sh-cell:last-child { border-right: none; }
+.sh-k {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 9px;
+}
+.sh-v {
+  font-family: var(--mono); font-size: 27px; font-weight: 700;
+  letter-spacing: -.03em; color: var(--text-strong); line-height: 1;
+}
+/* Same specificity as .sh-v but declared later, so the tone actually wins. */
+.sh-v.tone-phone { color: var(--phone); }
+.sh-of { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-left: 9px; letter-spacing: 0; }
+.sh-quota { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: 0; }
+.sh-meter { height: 5px; background: var(--bg-subtle); border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
+.sh-meter i { display: block; height: 100%; border-radius: 3px; }
+.sh-note { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
+
+.yield { display: flex; align-items: center; gap: 9px; }
+.yield-track { flex: 1; height: 4px; background: var(--bg-subtle); border-radius: 2px; overflow: hidden; max-width: 74px; }
+.yield-track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.yield-n { font-family: var(--mono); font-size: 12px; color: var(--text-secondary); }
+
+.data-table tbody tr.is-dry .dom-name { color: var(--text-muted); }
+
+/* Row tools stay out of the way until the row is hovered or focused. */
+.row-tools { opacity: 0; transition: opacity .12s; }
+tr:hover .row-tools, .row-tools:focus-within { opacity: 1; }
+
+@media (max-width: 1180px) {
+  .sh-strip { grid-template-columns: repeat(2, 1fr); }
+  .sh-cell { border-bottom: 1px solid var(--border); }
+}
+
 /* ── Detail drawer ──────────────────────────────────── */
 
 .drawer-scrim {
@@ -785,7 +829,7 @@ td.cell-check, th.cell-check { width: 38px; padding-left: 16px; }
 .drawer.open { transform: translateX(0); }
 
 .drawer-hd {
-  display: flex; align-items: flex-start; gap: 12px;
+  display: flex; align-items: center; gap: 11px;
   padding: 20px 22px;
   border-bottom: 1px solid var(--border);
 }

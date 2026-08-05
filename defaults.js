@@ -14,9 +14,6 @@ PROSPEKT.STORAGE_KEYS = {
   CONTACTS: "prospekt_contacts",
   SETTINGS: "prospekt_settings",
   PATTERNS: "prospekt_patterns",
-  // Domains scanned that yielded nothing. Kept so the dashboard can report a
-  // hit rate and surface domains worth skipping or writing patterns for.
-  BARREN: "prospekt_barren",
   // Two running totals for an exact page-level hit rate. Derived counts would
   // drift, because a domain leaves the barren list the moment it produces.
   METERS: "prospekt_meters",
@@ -26,7 +23,6 @@ PROSPEKT.DEFAULT_SETTINGS = {
   autoScan: true,
   maxScans: 5000,
   maxContacts: 20000,
-  maxBarren: 5000,
   remoteFavicons: false,
   // { contacts: ISO, scans: ISO } — stamped on export so the dashboard can
   // report what has been collected since you last took a copy.

@@ -16,6 +16,9 @@ const state = {
   duplicatesOnly: false,
   rolesOnly: false,
   selected: new Set(),
+  scanState: "all",
+  scanSort: "contacts",
+  scanSelected: new Set(),
 };
 
 let prefs = { ...PROSPEKT.DEFAULT_SETTINGS };
@@ -242,7 +245,8 @@ function setupSearch() {
 }
 
 function setupExport() {
-  document.getElementById("exportContactsBtn").addEventListener("click", () => doExport("contacts"));
+  document.getElementById("exportContactsBtn")
+    .addEventListener("click", e => doExport(e.currentTarget.dataset.exportType || "contacts"));
 }
 
 async function doExport(type) {
@@ -268,9 +272,17 @@ async function renderPage(page) {
   document.getElementById("pageSubtitle").textContent = "";
 
   // Search only applies to two pages — leaving a stale query visible on the
-  // others made the numbers look wrong.
+  // others made the numbers look wrong. The label and export target follow the
+  // page too, so "Export all" never means something different from what you see.
+  const searchable = page === "contacts" || page === "scans";
   const searchBox = document.querySelector(".search-global");
-  searchBox.style.visibility = (page === "contacts" || page === "scans") ? "visible" : "hidden";
+  searchBox.style.visibility = searchable ? "visible" : "hidden";
+  const input = document.getElementById("globalSearch");
+  input.placeholder = page === "scans" ? "Search domains" : "Search value, domain, or page";
+
+  const exportBtn = document.getElementById("exportContactsBtn");
+  exportBtn.lastChild.textContent = page === "scans" ? " Export scans" : " Export all";
+  exportBtn.dataset.exportType = page === "scans" ? "scans" : "contacts";
 
   const stats = await bg({ action: "getStats" });
   document.getElementById("navContactCount").textContent = num(stats?.totalContacts);
@@ -680,7 +692,7 @@ function wireContacts(el) {
   }));
 
   el.querySelectorAll("tr.row-click").forEach(tr => tr.addEventListener("click", () => {
-    openDrawer(tr.dataset.id);
+    openContactDrawer(tr.dataset.id);
   }));
 
   el.querySelector("#bulkClear")?.addEventListener("click", () => { state.selected.clear(); renderContacts(); });
@@ -719,7 +731,9 @@ const emptyState = (icon, title, body) =>
 // ══════════════════════════════════════════════════════════════════════════
 // CONTACT DRAWER
 // ══════════════════════════════════════════════════════════════════════════
-let drawerContact = null;
+// One drawer serves both Contacts and Scan history: same shell, different rows
+// and actions, so there is a single place that gets focus and Escape right.
+let drawerActions = { primary: null, secondary: null };
 
 /** Human description of how a value was found, from its stored source. */
 function matchedBy(c) {
@@ -738,33 +752,17 @@ function drawerRow(key, valueHtml) {
   return `<div class="drawer-row"><div class="drawer-k">${esc(key)}</div><div class="drawer-v">${valueHtml}</div></div>`;
 }
 
-function openDrawer(id) {
-  const c = contactsOnScreen.get(id);
-  if (!c) return;
-  drawerContact = c;
+function openDrawer({ title, iconHtml = "", rows, primary, secondary }) {
+  document.getElementById("drawerIcon").innerHTML = iconHtml;
+  document.getElementById("drawerTitle").textContent = title;
+  document.getElementById("drawerBody").innerHTML = rows;
 
-  document.getElementById("drawerTitle").textContent = c.value;
-
-  const pageUrl = safeUrl(c.found_at?.url);
-  const pages = c.pageCount || 1;
-
-  document.getElementById("drawerBody").innerHTML = [
-    drawerRow("Type", typeChip(c)),
-    drawerRow("Domain", `<span class="mono">${esc(c.found_at?.domain || "—")}</span>`),
-    drawerRow("Page", `${esc(c.found_at?.pageTitle || "—")}${pageUrl
-      ? `<span class="sub"><a href="${esc(pageUrl)}" target="_blank" rel="noopener noreferrer">${esc(c.found_at.url)}</a></span>` : ""}`),
-    drawerRow("First seen", esc(fullDate(c.added_at))),
-    drawerRow("Last seen", esc(c.last_seen_at ? timeAgo(c.last_seen_at) : timeAgo(c.added_at))),
-    drawerRow("Times seen", `<span class="mono">${num(pages)}</span>
-      <span class="badge badge-dup">across ${num(pages)} page${pages === 1 ? "" : "s"}</span>`),
-    drawerRow("Exported", c.exported
-      ? `Yes, ${esc(fullDate(c.exportedAt))}`
-      : `<span style="color:var(--text-muted)">Not yet</span>`),
-    c.isDuplicate
-      ? drawerRow("Also found on", `<span class="mono">${num(c.domainSpread - 1)}</span> other domain${c.domainSpread === 2 ? "" : "s"}`)
-      : "",
-    drawerRow("Matched by", esc(matchedBy(c))),
-  ].join("");
+  const p = document.getElementById("drawerPrimary");
+  const s = document.getElementById("drawerSecondary");
+  p.textContent = primary.label;
+  s.textContent = secondary.label;
+  s.className = "btn " + (secondary.tone || "");
+  drawerActions = { primary: primary.run, secondary: secondary.run };
 
   const drawer = document.getElementById("drawer");
   drawer.hidden = false;
@@ -781,7 +779,7 @@ function closeDrawer() {
   document.getElementById("drawerScrim").classList.remove("open");
   // Keep it out of the tab order once hidden.
   setTimeout(() => { if (!drawer.classList.contains("open")) drawer.hidden = true; }, 240);
-  drawerContact = null;
+  drawerActions = { primary: null, secondary: null };
 }
 
 function setupDrawer() {
@@ -790,39 +788,143 @@ function setupDrawer() {
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && !document.getElementById("drawer").hidden) closeDrawer();
   });
+  document.getElementById("drawerPrimary").addEventListener("click", () => drawerActions.primary?.());
+  document.getElementById("drawerSecondary").addEventListener("click", () => drawerActions.secondary?.());
+}
 
-  document.getElementById("drawerCopy").addEventListener("click", async () => {
-    if (!drawerContact) return;
-    try {
-      await navigator.clipboard.writeText(drawerContact.value);
-      toast("Copied");
-    } catch { toast("Clipboard blocked by the browser"); }
+// ── Contact drawer ───────────────────────────────────────────────────────
+function openContactDrawer(id) {
+  const c = contactsOnScreen.get(id);
+  if (!c) return;
+
+  const pageUrl = safeUrl(c.found_at?.url);
+  const pages = c.pageCount || 1;
+
+  openDrawer({
+    title: c.value,
+    rows: [
+      drawerRow("Type", typeChip(c)),
+      drawerRow("Domain", `<span class="mono">${esc(c.found_at?.domain || "—")}</span>`),
+      drawerRow("Page", `${esc(c.found_at?.pageTitle || "—")}${pageUrl
+        ? `<span class="sub"><a href="${esc(pageUrl)}" target="_blank" rel="noopener noreferrer">${esc(c.found_at.url)}</a></span>` : ""}`),
+      drawerRow("First seen", esc(fullDate(c.added_at))),
+      drawerRow("Last seen", esc(c.last_seen_at ? timeAgo(c.last_seen_at) : timeAgo(c.added_at))),
+      drawerRow("Times seen", `<span class="mono">${num(pages)}</span>
+        <span class="badge badge-dup">across ${num(pages)} page${pages === 1 ? "" : "s"}</span>`),
+      drawerRow("Exported", c.exported
+        ? `Yes, ${esc(fullDate(c.exportedAt))}`
+        : `<span style="color:var(--text-muted)">Not yet</span>`),
+      c.isDuplicate
+        ? drawerRow("Also found on", `<span class="mono">${num(c.domainSpread - 1)}</span> other domain${c.domainSpread === 2 ? "" : "s"}`)
+        : "",
+      drawerRow("Matched by", esc(matchedBy(c))),
+    ].join(""),
+    primary: {
+      label: "Copy value",
+      run: async () => {
+        try { await navigator.clipboard.writeText(c.value); toast("Copied"); }
+        catch { toast("Clipboard blocked by the browser"); }
+      },
+    },
+    secondary: {
+      label: "Discard",
+      tone: "btn-danger",
+      run: async () => {
+        if (!confirm("Discard this contact? This cannot be undone.")) return;
+        const res = await bg({ action: "deleteContact", contactId: c.id });
+        if (!res?.ok) return toast("Delete failed");
+        closeDrawer();
+        toast("Contact discarded");
+        renderPage("contacts");
+      },
+    },
   });
+}
 
-  document.getElementById("drawerDiscard").addEventListener("click", async () => {
-    if (!drawerContact) return;
-    if (!confirm("Discard this contact? This cannot be undone.")) return;
-    const res = await bg({ action: "deleteContact", contactId: drawerContact.id });
-    if (!res?.ok) return toast("Delete failed");
-    closeDrawer();
-    toast("Contact discarded");
-    renderPage("contacts");
+// ── Scan drawer ──────────────────────────────────────────────────────────
+function openScanDrawer(id) {
+  const s = scansOnScreen.get(id);
+  if (!s) return;
+
+  const c = s.counts || {};
+  const producing = (s.topPages || []).map(p => `
+    <div class="drawer-row">
+      <div class="drawer-v" style="flex:1">${esc(p.t || "—")}</div>
+      <div class="mono" style="color:var(--accent);font-weight:700">${num(p.n)}</div>
+    </div>`).join("");
+
+  openDrawer({
+    title: s.found_at?.domain || "—",
+    iconHtml: favCell(s.found_at?.domain, s.found_at?.favicon),
+    rows: [
+      drawerRow("Contacts", `<span class="mono" style="font-weight:700">${num(c.total)}</span>`),
+      drawerRow("Emails", `<span class="mono">${num(c.emails)}</span>`),
+      drawerRow("Phones", `<span class="mono">${num(c.phones)}</span>`),
+      drawerRow("Socials", `<span class="mono">${num(c.socials)}</span>`),
+      drawerRow("Custom", `<span class="mono">${num(c.customs)}</span>`),
+      drawerRow("Pages scanned", `<span class="mono">${num(s.pagesScanned)}</span>`),
+      drawerRow("Yield rate", `<span class="mono">${s.yieldRate}%</span> of pages`),
+      drawerRow("First seen", esc(fullDate(s.added_at))),
+      drawerRow("Last scan", esc(timeAgo(s.last_scanned_at || s.added_at))),
+      s.skipped ? drawerRow("Status", `<span class="badge badge-role">On your skip list</span>`) : "",
+      producing
+        ? `<div class="drawer-row" style="border-bottom:none;padding-bottom:4px">
+             <div class="drawer-k" style="width:auto">Pages that produced contacts</div></div>${producing}`
+        : drawerRow("Pages that produced", `<span style="color:var(--text-muted)">None yet</span>`),
+    ].join(""),
+    primary: {
+      label: "Rescan domain",
+      run: async () => {
+        const res = await bg({ action: "rescanDomain", domain: s.found_at?.domain });
+        if (!res?.ok) return toast("Couldn't rescan");
+        toast(res.notified
+          ? `Re-scanning ${res.notified} open tab${res.notified === 1 ? "" : "s"}`
+          : "Open that site in a tab first — Prospekt only reads pages you're viewing");
+      },
+    },
+    secondary: {
+      label: s.skipped ? "Stop skipping" : "Skip",
+      run: async () => {
+        const domain = s.found_at?.domain;
+        await bg({ action: s.skipped ? "unskipDomain" : "skipDomain", domain });
+        toast(s.skipped ? `No longer skipping ${domain}` : `Skipping ${domain}`);
+        closeDrawer();
+        renderPage("scans");
+      },
+    },
   });
 }
 
 // ══════════════════════════════════════════════════════════════════════════
 // SCAN HISTORY
 // ══════════════════════════════════════════════════════════════════════════
+const SCAN_STATES = [
+  { key: "all", label: "All" },
+  { key: "yielding", label: "Yielding" },
+  { key: "dry", label: "Dry" },
+  { key: "skipped", label: "Skipped" },
+];
+
+const SCAN_SORTS = [
+  { key: "contacts", label: "Most contacts" },
+  { key: "pages", label: "Most pages" },
+  { key: "yield", label: "Best yield" },
+  { key: "recent", label: "Most recent" },
+  { key: "domain", label: "By domain" },
+];
+
+let scansOnScreen = new Map();
+
 async function renderScans() {
   const el = document.getElementById("page-scans");
-  const filters = { limit: PER_PAGE, offset: (state.scanPage - 1) * PER_PAGE };
+  const filters = { limit: PER_PAGE, offset: (state.scanPage - 1) * PER_PAGE, sort: state.scanSort };
   if (state.search) filters.search = state.search;
+  if (state.scanState !== "all") filters.state = state.scanState;
 
   let res = await bg({ action: "getScans", filters });
   let total = res?.total || 0;
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
 
-  // Deleting or filtering can strand us past the last page.
   if (state.scanPage > pages) {
     state.scanPage = pages;
     filters.offset = (pages - 1) * PER_PAGE;
@@ -831,50 +933,126 @@ async function renderScans() {
   }
 
   const rows = res?.items || [];
+  const sc = res?.stateCounts || {};
+  const sum = res?.summary || {};
   const start = (state.scanPage - 1) * PER_PAGE;
 
+  scansOnScreen = new Map(rows.map(s => [s.id, s]));
+  state.scanSelected = new Set([...(state.scanSelected || [])].filter(id => scansOnScreen.has(id)));
+
+  document.getElementById("pageSubtitle").textContent =
+    sum.since ? `since ${new Date(sum.since).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : "";
+
+  const usedPct = sum.recordsMax ? Math.min(100, (sum.recordsUsed / sum.recordsMax) * 100) : 0;
+  const nearLimit = usedPct > 80;
+  const selCount = state.scanSelected.size;
+
   el.innerHTML = `
-    <div class="page-toolbar">
-      <div class="toolbar-meta">${num(total)} domain${total === 1 ? "" : "s"} with contacts</div>
-      <button type="button" class="btn btn-accent btn-sm" id="exportScansBtn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Export Scans
-      </button>
+    <div class="sh-strip">
+      <div class="sh-cell">
+        <div class="sh-k">Pages scanned</div>
+        <div class="sh-v">${num(sum.pagesScanned)}</div>
+      </div>
+      <div class="sh-cell">
+        <div class="sh-k">Domains yielding</div>
+        <div class="sh-v">${num(sum.domainsYielding)}<span class="sh-of">of ${num(sum.domainsTotal)}</span></div>
+      </div>
+      <div class="sh-cell">
+        <div class="sh-k">Dry domains</div>
+        <div class="sh-v tone-phone">${num(sum.dryDomains)}</div>
+      </div>
+      <div class="sh-cell sh-cell-wide">
+        <div class="sh-k">Record storage
+          <span class="sh-quota">${num(sum.recordsUsed)} / ${num(sum.recordsMax)}</span></div>
+        <div class="sh-meter"><i style="width:${usedPct}%;background:var(--${nearLimit ? "phone" : "accent"})"></i></div>
+        <p class="sh-note">Past the limit, the oldest scan records are dropped.
+          ${nearLimit ? "You're close — export before it wraps." : "You're well clear."}</p>
+      </div>
     </div>
 
-    ${total === 0 ? emptyState("🕐", "No scans yet",
-        state.search ? "Nothing matches that search." : "Browse websites normally — a domain is listed here once Prospekt finds at least one contact on it.") : `
+    <div class="ct-bar">
+      <div class="ct-chips">
+        ${SCAN_STATES.map(s => `
+          <button type="button" class="ct-chip ${state.scanState === s.key ? "on" : ""}" data-state="${s.key}">
+            ${esc(s.label)} <b>${num(sc[s.key] ?? 0)}</b>
+          </button>`).join("")}
+      </div>
+      <div class="ct-sort">
+        <select id="shSort" aria-label="Sort domains">
+          ${SCAN_SORTS.map(s => `<option value="${s.key}" ${state.scanSort === s.key ? "selected" : ""}>${esc(s.label)}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+
+    ${selCount ? `
+      <div class="bulk">
+        <b>${num(selCount)}</b> selected
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-sm btn-danger" id="shDelete">Delete records</button>
+        <button type="button" class="btn btn-sm btn-ghost" id="shClear">Clear</button>
+      </div>` : ""}
+
+    ${total === 0 ? emptyState("🕐", "Nothing here yet",
+        state.search ? "No domain matches that search."
+          : "Browse websites normally — every domain Prospekt looks at is listed here.") : `
     <div class="table-wrap">
       <table class="data-table">
         <thead>
           <tr>
+            <th class="cell-check"><input type="checkbox" class="check" id="shSelAll"
+              ${rows.length && rows.every(r => state.scanSelected.has(r.id)) ? "checked" : ""}
+              aria-label="Select all on this page"></th>
             <th>Domain</th>
-            <th class="num">Emails</th>
-            <th class="num">Phones</th>
-            <th class="num">Socials</th>
-            <th class="num">Custom</th>
-            <th class="num">Total</th>
-            <th class="num">Scans</th>
-            <th style="width:100px">First Seen</th>
-            <th style="width:100px">Last Scan</th>
-            <th style="width:44px"><span class="sr-only">Actions</span></th>
+            <th class="num">Contacts</th>
+            <th class="num">Pages</th>
+            <th style="width:150px">Yield rate</th>
+            <th style="width:96px">First seen</th>
+            <th style="width:104px">Last scan</th>
+            <th style="width:112px"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           ${rows.map(s => {
             const c = s.counts || {};
+            const bar = TYPE_META.filter(t => c[t.plural] > 0)
+              .map(t => `<i style="flex:${c[t.plural]};background:var(--${t.key})"></i>`).join("");
             return `
-            <tr>
-              <td>${domainCell(s.found_at?.domain, s.found_at?.favicon)}</td>
-              <td class="num ${c.emails ? "tone-accent" : "tone-muted"}">${num(c.emails)}</td>
-              <td class="num ${c.phones ? "tone-purple" : "tone-muted"}">${num(c.phones)}</td>
-              <td class="num ${c.socials ? "tone-blue" : "tone-muted"}">${num(c.socials)}</td>
-              <td class="num ${c.customs ? "tone-pink" : "tone-muted"}">${num(c.customs)}</td>
-              <td class="num num-strong">${num(c.total)}</td>
-              <td class="num">${num(s.scan_count || 1)}</td>
-              <td class="cell-time" title="${esc(fullDate(s.added_at))}">${esc(timeAgo(s.added_at))}</td>
-              <td class="cell-time" title="${esc(fullDate(s.last_scanned_at || s.added_at))}">${esc(timeAgo(s.last_scanned_at || s.added_at))}</td>
-              <td><button type="button" class="cell-btn del scan-del" data-scan-id="${esc(s.id)}" title="Delete scan" aria-label="Delete scan">${IC.trash}</button></td>
+            <tr class="row-click ${state.scanSelected.has(s.id) ? "is-selected" : ""} ${s.dry ? "is-dry" : ""}" data-id="${esc(s.id)}">
+              <td class="cell-check">
+                <input type="checkbox" class="check scan-check" data-id="${esc(s.id)}"
+                  ${state.scanSelected.has(s.id) ? "checked" : ""} aria-label="Select ${esc(s.found_at?.domain)}">
+              </td>
+              <td>
+                <div class="cell-domain">
+                  ${favCell(s.found_at?.domain, s.found_at?.favicon)}
+                  <div style="min-width:0">
+                    <div class="dom-name">${esc(s.found_at?.domain || "—")}
+                      ${s.dry ? `<span class="badge badge-role">Dry</span>` : ""}
+                      ${s.skipped ? `<span class="badge badge-dup">Skipped</span>` : ""}</div>
+                    <div class="dom-bar">${bar}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="num num-strong">${c.total ? num(c.total) : "—"}</td>
+              <td class="num">${num(s.pagesScanned)}</td>
+              <td>
+                <div class="yield">
+                  <div class="yield-track"><i style="width:${Math.max(2, s.yieldRate)}%"></i></div>
+                  <span class="yield-n ${s.yieldRate ? "" : "tone-phone"}">${s.yieldRate}%</span>
+                </div>
+              </td>
+              <td class="cell-time">${esc(shortDate(s.added_at))}</td>
+              <td class="cell-time">${esc(timeAgo(s.last_scanned_at || s.added_at))}</td>
+              <td class="cell-actions row-tools">
+                <button type="button" class="cell-btn sh-rescan" data-domain="${esc(s.found_at?.domain)}" title="Rescan domain" aria-label="Rescan">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+                </button>
+                <button type="button" class="cell-btn sh-skip" data-domain="${esc(s.found_at?.domain)}" data-skipped="${s.skipped ? "1" : ""}"
+                        title="${s.skipped ? "Stop skipping" : "Skip domain"}" aria-label="Skip">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+                </button>
+                <button type="button" class="cell-btn del sh-del" data-id="${esc(s.id)}" title="Delete record" aria-label="Delete">${IC.trash}</button>
+              </td>
             </tr>`;
           }).join("")}
         </tbody>
@@ -885,17 +1063,76 @@ async function renderScans() {
   `;
 
   attachFaviconFallbacks(el);
+  wireScans(el);
+}
+
+function wireScans(el) {
+  el.querySelectorAll("[data-state]").forEach(b => b.addEventListener("click", () => {
+    state.scanState = b.dataset.state;
+    state.scanPage = 1;
+    renderScans();
+  }));
+
+  el.querySelector("#shSort")?.addEventListener("change", e => {
+    state.scanSort = e.target.value;
+    state.scanPage = 1;
+    renderScans();
+  });
+
   el.querySelector("#sPrev")?.addEventListener("click", () => { state.scanPage--; renderScans(); });
   el.querySelector("#sNext")?.addEventListener("click", () => { state.scanPage++; renderScans(); });
-  el.querySelector("#exportScansBtn")?.addEventListener("click", () => doExport("scans"));
 
-  el.querySelectorAll(".scan-del").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("Delete this domain's scan record and every contact found on it?")) return;
-      await bg({ action: "deleteScan", scanId: btn.dataset.scanId });
-      toast("Scan deleted");
-      renderPage("scans");
-    });
+  el.querySelector("#shSelAll")?.addEventListener("change", e => {
+    const ids = [...scansOnScreen.keys()];
+    if (e.target.checked) ids.forEach(id => state.scanSelected.add(id));
+    else ids.forEach(id => state.scanSelected.delete(id));
+    renderScans();
+  });
+
+  el.querySelectorAll(".scan-check").forEach(box => box.addEventListener("click", e => {
+    e.stopPropagation();
+    if (box.checked) state.scanSelected.add(box.dataset.id);
+    else state.scanSelected.delete(box.dataset.id);
+    renderScans();
+  }));
+
+  // Row tools must not also open the drawer.
+  el.querySelectorAll(".row-tools").forEach(td => td.addEventListener("click", e => e.stopPropagation()));
+
+  el.querySelectorAll(".sh-rescan").forEach(b => b.addEventListener("click", async () => {
+    const res = await bg({ action: "rescanDomain", domain: b.dataset.domain });
+    toast(res?.notified
+      ? `Re-scanning ${res.notified} open tab${res.notified === 1 ? "" : "s"}`
+      : "Open that site in a tab first — Prospekt only reads pages you're viewing");
+  }));
+
+  el.querySelectorAll(".sh-skip").forEach(b => b.addEventListener("click", async () => {
+    const skipped = !!b.dataset.skipped;
+    await bg({ action: skipped ? "unskipDomain" : "skipDomain", domain: b.dataset.domain });
+    toast(skipped ? `No longer skipping ${b.dataset.domain}` : `Skipping ${b.dataset.domain}`);
+    renderPage("scans");
+  }));
+
+  el.querySelectorAll(".sh-del").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm("Delete this domain's record and every contact found on it?")) return;
+    await bg({ action: "deleteScan", scanId: b.dataset.id });
+    toast("Record deleted");
+    renderPage("scans");
+  }));
+
+  el.querySelectorAll("tr.row-click").forEach(tr =>
+    tr.addEventListener("click", () => openScanDrawer(tr.dataset.id)));
+
+  el.querySelector("#shClear")?.addEventListener("click", () => { state.scanSelected.clear(); renderScans(); });
+
+  el.querySelector("#shDelete")?.addEventListener("click", async () => {
+    const n = state.scanSelected.size;
+    if (!confirm(`Delete ${n} record${n === 1 ? "" : "s"} and every contact found on ${n === 1 ? "it" : "them"}?`)) return;
+    const res = await bg({ action: "deleteScans", ids: [...state.scanSelected] });
+    if (!res?.ok) return toast("Delete failed");
+    state.scanSelected.clear();
+    toast(`Deleted ${res.removed} record${res.removed === 1 ? "" : "s"}`);
+    renderPage("scans");
   });
 }
 
