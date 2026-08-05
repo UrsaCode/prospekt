@@ -19,6 +19,7 @@ const state = {
   scanState: "all",
   scanSort: "contacts",
   scanSelected: new Set(),
+  range: "12w",
 };
 
 let prefs = { ...PROSPEKT.DEFAULT_SETTINGS };
@@ -176,6 +177,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupExport();
   setupAutoScanToggle();
   setupDrawer();
+  setupRange();
   reflectAutoScan();
   if (!routeFromHash()) renderPage("overview");
 });
@@ -250,6 +252,12 @@ function setupExport() {
 }
 
 async function doExport(type) {
+  if (type === "insights") {
+    const rep = await bg({ action: "exportInsights", range: state.range });
+    if (!rep?.csv) return toast("Export failed");
+    downloadFile(rep.csv, `prospekt-insights-${state.range}.csv`);
+    return toast("Report exported");
+  }
   const res = await bg({ action: "exportCSV", type });
   if (res?.csv) {
     downloadFile(res.csv, `prospekt-${type}.csv`);
@@ -281,8 +289,13 @@ async function renderPage(page) {
   input.placeholder = page === "scans" ? "Search domains" : "Search value, domain, or page";
 
   const exportBtn = document.getElementById("exportContactsBtn");
-  exportBtn.lastChild.textContent = page === "scans" ? " Export scans" : " Export all";
-  exportBtn.dataset.exportType = page === "scans" ? "scans" : "contacts";
+  const exportFor = { scans: "scans", insights: "insights" }[page] || "contacts";
+  exportBtn.lastChild.textContent =
+    exportFor === "scans" ? " Export scans" : exportFor === "insights" ? " Export report" : " Export all";
+  exportBtn.dataset.exportType = exportFor;
+
+  // The range selector only means something on Insights.
+  document.getElementById("rangeSelect").style.display = page === "insights" ? "" : "none";
 
   const stats = await bg({ action: "getStats" });
   document.getElementById("navContactCount").textContent = num(stats?.totalContacts);
@@ -292,7 +305,7 @@ async function renderPage(page) {
     case "overview": return renderOverview();
     case "contacts": return renderContacts();
     case "scans": return renderScans();
-    case "insights": return renderInsights(stats);
+    case "insights": return renderInsights();
     case "settings": return renderSettings();
   }
 }
@@ -1139,95 +1152,179 @@ function wireScans(el) {
 // ══════════════════════════════════════════════════════════════════════════
 // INSIGHTS
 // ══════════════════════════════════════════════════════════════════════════
-async function renderInsights(stats) {
-  const s = { ...EMPTY_STATS, ...(stats || await bg({ action: "getStats" }) || {}) };
-  const el = document.getElementById("page-insights");
+const RANGE_OPTIONS = [
+  { key: "7d", label: "7D" },
+  { key: "30d", label: "30D" },
+  { key: "12w", label: "12W" },
+  { key: "all", label: "All" },
+];
 
-  if (!s.totalContacts) {
-    el.innerHTML = emptyState("📊", "No data yet", "Browse some websites and analytics will build up here.");
+const RANGE_SUBTITLE = { "7d": "7 days", "30d": "30 days", "12w": "12 weeks", all: "all time" };
+
+async function renderInsights() {
+  const el = document.getElementById("page-insights");
+  const i = await bg({ action: "getInsights", range: state.range });
+
+  if (!i) {
+    el.innerHTML = emptyState("⚠️", "Couldn't load insights",
+      "The background worker didn't respond. Reload this page to try again.");
     return;
   }
 
-  const maxDomain = s.topDomains[0]?.count || 1;
-  const tones = ["accent", "blue", "purple", "amber", "pink", "cyan", "red"];
+  document.getElementById("pageSubtitle").textContent = RANGE_SUBTITLE[i.range] || "";
 
-  // Every type is represented, so the percentages actually add up to 100.
-  const breakdown = [
-    { label: "Emails", count: s.emails, tone: "accent" },
-    { label: "Phones", count: s.phones, tone: "purple" },
-    { label: "Socials", count: s.socials, tone: "blue" },
-    { label: "Custom", count: s.customs, tone: "pink" },
-  ].filter(t => t.count > 0);
+  const anyData = i.patterns.some(p => p.matches > 0);
+  if (!anyData) {
+    el.innerHTML = emptyState("📊", "Nothing in this window",
+      "No contacts were collected in this period. Widen the range, or browse a few sites first.");
+    return;
+  }
 
-  const barRows = (entries, offset = 0) => entries.map(([label, count], i) => {
-    const max = Math.max(...entries.map(e => e[1]), 1);
-    return `
-      <div class="bar-h-row">
-        <span class="bar-h-label" title="${esc(label)}">${esc(label)}</span>
-        <div class="bar-h-track">
-          <div class="bar-h-fill tone-bg-${tones[(i + offset) % tones.length]}" style="width:${Math.max(8, (count / max) * 100)}%">${num(count)}</div>
+  // ── What came in ──
+  const peak = Math.max(...i.series.map(w => w.total), 1);
+  const axis = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(peak * f)).reverse();
+
+  const bars = i.series.map(w => `
+    <div class="ins-col" title="${esc(w.label)}: ${num(w.total)}">
+      <div class="ins-stack" style="height:${(w.total / peak) * 100}%">
+        ${TYPE_META.filter(t => w[t.key] > 0).map(t =>
+          `<i style="flex:${w[t.key]};background:var(--${t.key})"></i>`).join("")}
+      </div>
+      <span class="ins-x">${esc(w.label)}</span>
+    </div>`).join("");
+
+  // ── Pattern performance ──
+  const patternRows = i.patterns.map(p => `
+    <tr>
+      <td>
+        <div class="pat-name"><span class="pat-dot" style="background:var(--${p.type})"></span>${esc(p.name)}</div>
+        <div class="pat-src mono">${esc(truncate(p.regex, 64))}</div>
+      </td>
+      <td class="num num-strong">${num(p.matches)}</td>
+      <td>
+        <div class="yield">
+          <div class="yield-track"><i style="width:${Math.max(2, p.bar)}%;background:var(--${p.type})"></i></div>
+          <span class="yield-n">${p.share}%</span>
         </div>
-      </div>`;
-  }).join("");
+      </td>
+      <td class="cell-time">${esc(p.lastMatch ? timeAgo(p.lastMatch) : "never")}</td>
+      <td><span class="health health-${p.health.tone}">${esc(p.health.text)}</span></td>
+    </tr>`).join("");
+
+  // ── Email quality ──
+  const q = i.emailQuality;
+  const qPct = n => (q.total ? Math.round((n / q.total) * 100) : 0);
+  const others = Math.max(0, q.companyDomainCount - q.topCompanyDomains.length);
+  const qualityRows = [
+    { label: "Company domains", n: q.company, tone: "email",
+      hint: q.topCompanyDomains.length
+        ? `${q.topCompanyDomains.join(", ")}${others ? `, and ${num(others)} others` : ""}` : "" },
+    { label: "Free providers", n: q.free, tone: "social", hint: "gmail, outlook, yahoo, proton" },
+    { label: "Role addresses", n: q.role, tone: "phone", hint: "info@, sales@, support@, hello@" },
+  ].map(r => `
+    <div class="qual">
+      <div class="qual-hd">
+        <span class="qual-label">${esc(r.label)}<small>${esc(r.hint)}</small></span>
+        <span class="qual-n">${num(r.n)}<small>${qPct(r.n)}%</small></span>
+      </div>
+      <div class="qual-track"><i style="width:${Math.max(1, qPct(r.n))}%;background:var(--${r.tone})"></i></div>
+    </div>`).join("");
+
+  // ── Social platforms ──
+  const socialMax = Math.max(...i.socials.items.map(s => s.count), 1);
+  const socialRows = i.socials.items.map(s => `
+    <div class="qual">
+      <div class="qual-hd">
+        <span class="qual-label">${esc(s.label)}</span>
+        <span class="qual-n">${num(s.count)}<small>${i.socials.total ? Math.round((s.count / i.socials.total) * 100) : 0}%</small></span>
+      </div>
+      <div class="qual-track"><i style="width:${Math.max(1, (s.count / socialMax) * 100)}%;background:var(--social)"></i></div>
+    </div>`).join("") || `<div class="chart-empty">No social profiles collected yet</div>`;
+
+  // ── Yield distribution ──
+  const distMax = Math.max(...i.distribution.map(b => b.count), 1);
+  const dist = i.distribution.map(b => `
+    <div class="dist-col">
+      <span class="dist-n">${num(b.count)}</span>
+      <div class="dist-bar" style="height:${Math.max(3, (b.count / distMax) * 100)}%"></div>
+      <span class="dist-lbl">${esc(b.label)}<small>${esc(b.sub)}</small></span>
+    </div>`).join("");
 
   el.innerHTML = `
-    <div class="stat-grid">
-      ${statCard("Total Scans", s.totalScans, "accent")}
-      ${statCard("Unique Domains", s.totalDomains, "blue")}
-      ${statCard("Phones Found", s.phones, "purple")}
-      ${statCard("Custom Matches", s.customs, "pink")}
+    <section class="panel">
+      <div class="panel-hd">
+        <h2>What came in <span class="hd-sub">new contacts per week</span></h2>
+        <div class="legend">
+          ${TYPE_META.map(t => `<span><i style="background:var(--${t.key})"></i>${esc(t.label.replace(/s$/, ""))}</span>`).join("")}
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="ins-chart">
+          <div class="ins-axis">${axis.map(v => `<span>${num(v)}</span>`).join("")}</div>
+          <div class="ins-plot">${bars}</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-hd">
+        <h2>Pattern performance <span class="hd-sub">what each regex is actually catching</span></h2>
+        <button type="button" class="panel-link" data-goto="settings">Edit patterns →</button>
+      </div>
+      <div class="table-wrap" style="border:none;border-radius:0">
+        <table class="data-table">
+          <thead><tr>
+            <th>Pattern</th><th class="num">Matches</th>
+            <th style="width:170px">Share</th><th style="width:110px">Last match</th>
+            <th style="width:190px">Health</th>
+          </tr></thead>
+          <tbody>${patternRows}</tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="ov-grid-2">
+      <section class="panel">
+        <div class="panel-hd"><h2>Email quality <span class="hd-sub">${num(q.total)} addresses</span></h2></div>
+        <div class="panel-body">
+          ${qualityRows}
+          <p class="ins-note">Free-provider and role addresses are still contacts — they're just rarely
+            the person you want. <button type="button" class="linkish" data-goto="contacts">Filter them out on Contacts</button>.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-hd"><h2>Social platforms <span class="hd-sub">${num(i.socials.total)} profiles</span></h2></div>
+        <div class="panel-body">${socialRows}</div>
+      </section>
     </div>
 
-    <div class="grid-2col">
-      <div class="chart-card">
-        <h3>Top Domains by Contacts</h3>
-        <div class="bar-h">
-          ${s.topDomains.map((d, i) => `
-            <div class="bar-h-row">
-              <span class="bar-h-label" title="${esc(d.domain)}">${esc(d.domain)}</span>
-              <div class="bar-h-track">
-                <div class="bar-h-fill tone-bg-${tones[i % tones.length]}" style="width:${Math.max(8, (d.count / maxDomain) * 100)}%">${num(d.count)}</div>
-              </div>
-            </div>`).join("") || `<div class="chart-empty">No data</div>`}
-        </div>
+    <section class="panel">
+      <div class="panel-hd"><h2>Yield distribution <span class="hd-sub">${num(i.domainsTotal)} domains by contacts per page</span></h2></div>
+      <div class="panel-body">
+        <div class="dist">${dist}</div>
+        <p class="ins-note">Most of what you browse gives up nothing — that's normal.
+          ${i.zeroDomains ? `The ${num(i.zeroDomains)} domains in the zero bucket have been scanned repeatedly;
+          skipping them cuts wasted work without costing you contacts.` : ""}</p>
       </div>
-
-      <div class="chart-card">
-        <h3>Contact Type Breakdown</h3>
-        <div class="breakdown">
-          ${breakdown.map(t => {
-            const pct = Math.round(t.count / s.totalContacts * 100);
-            return `
-            <div>
-              <div class="breakdown-head">
-                <span>${esc(t.label)}</span>
-                <span class="tone-${t.tone} breakdown-num">${num(t.count)} (${pct}%)</span>
-              </div>
-              <div class="breakdown-track">
-                <div class="breakdown-fill tone-bg-${t.tone}" style="width:${Math.max(2, pct)}%"></div>
-              </div>
-            </div>`;
-          }).join("")}
-        </div>
-      </div>
-
-      <div class="chart-card">
-        <h3>Social Platform Breakdown</h3>
-        <div class="bar-h">
-          ${barRows(Object.entries(s.platformCounts || {}).sort((a, b) => b[1] - a[1]), 2)
-            || `<div class="chart-empty">No social profiles collected yet</div>`}
-        </div>
-      </div>
-
-      <div class="chart-card">
-        <h3>${Object.keys(s.customLabelCounts || {}).length ? "Custom Pattern Matches" : "Daily Scan Activity"}</h3>
-        ${Object.keys(s.customLabelCounts || {}).length
-          ? `<div class="bar-h">${barRows(Object.entries(s.customLabelCounts).sort((a, b) => b[1] - a[1]), 4)}</div>`
-          : `<div class="mini-chart mini-chart-tall">${sparkline(s.dailyScans)}</div>`}
-      </div>
-    </div>
+    </section>
   `;
+
+  el.querySelectorAll("[data-goto]").forEach(b =>
+    b.addEventListener("click", () => document.querySelector(`.nav-item[data-page="${b.dataset.goto}"]`)?.click()));
 }
+
+function setupRange() {
+  const wrap = document.getElementById("rangeSelect");
+  wrap.innerHTML = RANGE_OPTIONS.map(r =>
+    `<button type="button" class="range-btn ${state.range === r.key ? "on" : ""}" data-range="${r.key}">${esc(r.label)}</button>`).join("");
+  wrap.querySelectorAll(".range-btn").forEach(b => b.addEventListener("click", () => {
+    state.range = b.dataset.range;
+    setupRange();
+    renderInsights();
+  }));
+}
+
 
 // ══════════════════════════════════════════════════════════════════════════
 // SETTINGS

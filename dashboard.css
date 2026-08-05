@@ -764,6 +764,70 @@ td.cell-check, th.cell-check { width: 38px; padding-left: 16px; }
 .badge-role { background: color-mix(in srgb, var(--phone) 18%, transparent); color: var(--phone); }
 .badge-dup { background: color-mix(in srgb, var(--social) 18%, transparent); color: var(--social); }
 
+/* ── Insights ───────────────────────────────────────── */
+
+.range { display: flex; gap: 2px; padding: 3px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+.range-btn {
+  padding: 6px 12px; border: none; background: transparent; border-radius: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  color: var(--text-muted); cursor: pointer; transition: background .12s, color .12s;
+}
+.range-btn:hover { color: var(--text-primary); }
+.range-btn.on { background: var(--bg-raised); color: var(--text-strong); }
+
+.hd-sub { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted); margin-left: 9px; font-size: 11px; }
+.legend { display: flex; gap: 14px; font-size: 9.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--text-muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 7px; height: 7px; border-radius: 2px; }
+
+.ins-chart { display: flex; gap: 12px; height: 232px; }
+.ins-axis {
+  display: flex; flex-direction: column; justify-content: space-between;
+  font-family: var(--mono); font-size: 9.5px; color: var(--text-muted);
+  text-align: right; padding-bottom: 20px; flex-shrink: 0; min-width: 30px;
+}
+.ins-plot { flex: 1; display: flex; align-items: flex-end; gap: 8px; border-bottom: 1px solid var(--border); }
+.ins-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; height: 100%; position: relative; }
+.ins-stack { display: flex; flex-direction: column-reverse; border-radius: 3px 3px 0 0; overflow: hidden; min-height: 2px; }
+.ins-stack i { display: block; width: 100%; }
+.ins-x { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-family: var(--mono); font-size: 9.5px; color: var(--text-muted); }
+
+.pat-name { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.pat-dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+.pat-src { font-size: 11px; color: var(--text-muted); margin-top: 5px; margin-left: 15px; overflow-wrap: anywhere; }
+
+.health {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border-radius: 5px;
+  font-size: 10.5px; font-weight: 600; font-family: var(--mono);
+  white-space: nowrap;
+}
+.health::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.health-ok { background: color-mix(in srgb, #34d399 14%, transparent); color: #34d399; }
+.health-warn { background: color-mix(in srgb, var(--phone) 15%, transparent); color: var(--phone); }
+.health-idle { background: var(--bg-subtle); color: var(--text-muted); }
+
+.qual { margin-bottom: 17px; }
+.qual:last-of-type { margin-bottom: 8px; }
+.qual-hd { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 7px; }
+.qual-label { font-size: 13px; font-weight: 600; color: var(--text-primary); min-width: 0; }
+.qual-label small { font-weight: 400; font-size: 11px; color: var(--text-muted); margin-left: 8px; }
+.qual-n { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--text-strong); flex-shrink: 0; }
+.qual-n small { font-size: 10.5px; font-weight: 500; color: var(--text-muted); margin-left: 6px; }
+.qual-track { height: 6px; background: var(--bg-subtle); border-radius: 3px; overflow: hidden; }
+.qual-track i { display: block; height: 100%; border-radius: 3px; }
+
+.ins-note { font-size: 11.5px; color: var(--text-muted); line-height: 1.65; margin-top: 16px; }
+.linkish { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.linkish:hover { text-decoration: underline; }
+
+.dist { display: flex; align-items: flex-end; gap: 14px; height: 190px; padding-bottom: 34px; }
+.dist-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; position: relative; }
+.dist-n { font-family: var(--mono); font-size: 12px; color: var(--text-secondary); margin-bottom: 7px; }
+.dist-bar { width: 100%; background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 4px 4px 0 0; }
+.dist-lbl { position: absolute; bottom: -30px; text-align: center; font-size: 10.5px; color: var(--text-muted); }
+.dist-lbl small { display: block; font-family: var(--mono); font-size: 9.5px; margin-top: 2px; opacity: .75; }
+
 /* ── Scan history ───────────────────────────────────── */
 
 .sh-strip {

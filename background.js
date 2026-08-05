@@ -187,11 +187,180 @@ const HANDLERS = {
   unskipDomain: msg => serialize(() => setDomainSkipped(msg.domain, false)),
   exportPage: msg => exportPage(msg.tabId).then(csv => ({ csv })),
   getOverview: () => getOverview(),
+  getInsights: msg => getInsights(msg?.range),
+  exportInsights: msg => getInsights(msg?.range).then(i => ({ csv: insightsCsv(i) })),
   deleteContacts: msg => serialize(() => deleteContacts(msg.ids)),
   deleteScans: msg => serialize(() => deleteScans(msg.ids)),
   rescanDomain: msg => rescanDomain(msg.domain),
   exportSelection: msg => exportSelection(msg.ids).then(csv => ({ csv })),
 };
+
+// ── Insights ────────────────────────────────────────────────────────────
+const RANGES = { "7d": 7, "30d": 30, "12w": 84, all: null };
+const WEEK_MS = 7 * 86400000;
+
+/**
+ * Everything the Insights page shows, derived from what is already stored —
+ * no extra bookkeeping. Patterns are matched to contacts by what extraction
+ * already records: type for email/phone, platform for socials, label for
+ * custom patterns.
+ */
+async function getInsights(range = "12w") {
+  const d = await get([SCANS, CONTACTS, PATTERNS]);
+  const allContacts = Array.isArray(d[CONTACTS]) ? d[CONTACTS] : [];
+  const scans = Array.isArray(d[SCANS]) ? d[SCANS] : [];
+  const patterns = PROSPEKT.resolvePatterns(d[PATTERNS]);
+
+  const days = RANGES[range] ?? RANGES["12w"];
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const contacts = days
+    ? allContacts.filter(c => c.added_at && new Date(c.added_at).getTime() >= cutoff)
+    : allContacts;
+
+  // ── What came in: weekly buckets, stacked by type ──
+  const weeks = days ? Math.ceil(days / 7) : Math.max(1, Math.min(52,
+    Math.ceil((Date.now() - new Date(allContacts.at(-1)?.added_at || Date.now()).getTime()) / WEEK_MS)));
+  const now = Date.now();
+  const series = Array.from({ length: weeks }, (_, i) => ({
+    label: "w" + (i + 1),
+    start: now - (weeks - i) * WEEK_MS,
+    email: 0, phone: 0, social: 0, custom: 0, total: 0,
+  }));
+  for (const c of contacts) {
+    if (!c.added_at) continue;
+    const t = new Date(c.added_at).getTime();
+    let idx = Math.floor((t - (now - weeks * WEEK_MS)) / WEEK_MS);
+    if (idx < 0 || idx >= weeks) continue;
+    const b = series[idx];
+    if (b[c.type] !== undefined) b[c.type]++;
+    b.total++;
+  }
+
+  // ── Pattern performance ──
+  const lastOf = list => list.reduce((m, c) => (!m || (c.added_at > m) ? c.added_at : m), null);
+  const rows = [];
+
+  const emails = contacts.filter(c => c.type === "email");
+  rows.push({ name: "Email", type: "email", regex: patterns.emailRegex,
+    matches: emails.length, lastMatch: lastOf(emails) });
+
+  const phones = contacts.filter(c => c.type === "phone");
+  const dateLike = phones.filter(c => PROSPEKT.looksLikeDate(c.value)).length;
+  rows.push({ name: "Phone", type: "phone", regex: patterns.phoneRegex,
+    matches: phones.length, lastMatch: lastOf(phones),
+    warn: phones.length && dateLike / phones.length >= 0.1
+      ? `${Math.round((dateLike / phones.length) * 100)}% look like dates` : null });
+
+  for (const sp of patterns.socialPatterns || []) {
+    const hits = contacts.filter(c => c.type === "social" && c.platform === sp.platform);
+    rows.push({ name: sp.label || sp.platform, type: "social", regex: sp.regex,
+      matches: hits.length, lastMatch: lastOf(hits) });
+  }
+  const configured = new Set();
+  for (const cp of patterns.customPatterns || []) {
+    configured.add(cp.label);
+    const hits = contacts.filter(c => c.type === "custom" && c.label === cp.label);
+    rows.push({ name: cp.label, type: "custom", regex: cp.regex,
+      matches: hits.length, lastMatch: lastOf(hits) });
+  }
+  // Contacts kept from a custom pattern that has since been deleted still count
+  // toward the library. Omitting them here would make the shares stop adding up
+  // and quietly hide matches the user can still see on the Contacts page.
+  const orphanLabels = new Set(contacts
+    .filter(c => c.type === "custom" && c.label && !configured.has(c.label))
+    .map(c => c.label));
+  for (const label of orphanLabels) {
+    const hits = contacts.filter(c => c.type === "custom" && c.label === label);
+    rows.push({ name: label, type: "custom", regex: "— pattern no longer configured",
+      matches: hits.length, lastMatch: lastOf(hits), orphan: true });
+  }
+
+  const maxMatches = Math.max(...rows.map(r => r.matches), 1);
+  const totalMatches = rows.reduce((s, r) => s + r.matches, 0) || 1;
+  for (const r of rows) {
+    r.share = Math.round((r.matches / totalMatches) * 100);
+    r.bar = Math.round((r.matches / maxMatches) * 100);
+    const weeksSince = r.lastMatch ? Math.floor((now - new Date(r.lastMatch).getTime()) / WEEK_MS) : null;
+    r.health = r.orphan ? { tone: "warn", text: "Pattern removed" }
+      : !r.matches ? { tone: "idle", text: "No matches yet" }
+      : weeksSince >= 3 ? { tone: "idle", text: `No match in ${weeksSince} weeks` }
+      : r.warn ? { tone: "warn", text: r.warn }
+      : { tone: "ok", text: "Healthy" };
+  }
+  rows.sort((a, b) => b.matches - a.matches);
+
+  // ── Email quality ──
+  const quality = { company: 0, free: 0, role: 0 };
+  const companyDomains = new Map();
+  for (const c of emails) {
+    if (PROSPEKT.isRoleAddress(c.value)) quality.role++;
+    else if (PROSPEKT.isFreeProvider(c.value)) quality.free++;
+    else {
+      quality.company++;
+      const dom = c.value.slice(c.value.lastIndexOf("@") + 1).toLowerCase();
+      companyDomains.set(dom, (companyDomains.get(dom) || 0) + 1);
+    }
+  }
+  const topCompany = [...companyDomains.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(e => e[0]);
+
+  // ── Social platforms ──
+  const platformCounts = {};
+  for (const c of contacts) {
+    if (c.type !== "social") continue;
+    const p = c.platform || "other";
+    platformCounts[p] = (platformCounts[p] || 0) + 1;
+  }
+  const labelFor = p => (patterns.socialPatterns || []).find(s => s.platform === p)?.label || p;
+  const socials = Object.entries(platformCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([platform, count]) => ({ platform, label: labelFor(platform), count }));
+  const socialTotal = socials.reduce((s, x) => s + x.count, 0);
+
+  // ── Yield distribution ──
+  const BUCKETS = [
+    { key: "zero", label: "Zero", sub: "0%", test: r => r === 0 },
+    { key: "low", label: "Low", sub: "1–10%", test: r => r > 0 && r <= 10 },
+    { key: "fair", label: "Fair", sub: "11–25%", test: r => r > 10 && r <= 25 },
+    { key: "good", label: "Good", sub: "26–50%", test: r => r > 25 && r <= 50 },
+    { key: "high", label: "High", sub: "51%+", test: r => r > 50 },
+  ];
+  const distribution = BUCKETS.map(b => ({
+    ...b, test: undefined,
+    count: scans.filter(s => b.test(yieldRate(s))).length,
+  }));
+
+  return {
+    range,
+    weeks,
+    series,
+    patterns: rows,
+    emailQuality: {
+      total: emails.length,
+      ...quality,
+      topCompanyDomains: topCompany,
+      companyDomainCount: companyDomains.size,
+    },
+    socials: { total: socialTotal, items: socials },
+    distribution,
+    domainsTotal: scans.length,
+    zeroDomains: distribution[0].count,
+  };
+}
+
+function insightsCsv(i) {
+  let csv = csvRow(["Section", "Item", "Value", "Detail"]);
+  for (const r of i.patterns) {
+    csv += csvRow(["Pattern", r.name, r.matches, `${r.share}% share · ${r.health.text}`]);
+  }
+  csv += csvRow(["Email quality", "Company domains", i.emailQuality.company, ""]);
+  csv += csvRow(["Email quality", "Free providers", i.emailQuality.free, ""]);
+  csv += csvRow(["Email quality", "Role addresses", i.emailQuality.role, ""]);
+  for (const s of i.socials.items) csv += csvRow(["Social platform", s.label, s.count, ""]);
+  for (const b of i.distribution) csv += csvRow(["Yield distribution", b.label, b.count, b.sub]);
+  for (const w of i.series) csv += csvRow(["Weekly", w.label, w.total,
+    `email ${w.email} · phone ${w.phone} · social ${w.social} · custom ${w.custom}`]);
+  return csv;
+}
 
 async function deleteScans(ids) {
   const wanted = new Set(ids || []);

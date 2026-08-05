@@ -37,6 +37,34 @@ PROSPEKT.ROLE_PREFIXES = [
   "careers", "team", "mail", "general", "service", "services", "orders",
 ];
 
+// Consumer mailbox providers. A real contact, just rarely the person you want
+// when you're prospecting a company.
+PROSPEKT.FREE_EMAIL_DOMAINS = [
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
+  "yahoo.com", "yahoo.co.uk", "ymail.com", "proton.me", "protonmail.com", "pm.me",
+  "icloud.com", "me.com", "mac.com", "aol.com", "gmx.com", "gmx.de", "mail.com",
+  "zoho.com", "yandex.com", "yandex.ru", "fastmail.com", "tutanota.com", "hey.com",
+];
+
+PROSPEKT.isFreeProvider = value => {
+  const at = String(value || "").lastIndexOf("@");
+  if (at < 1) return false;
+  return PROSPEKT.FREE_EMAIL_DOMAINS.includes(String(value).slice(at + 1).toLowerCase());
+};
+
+/**
+ * A phone match that is probably a date. The extractor already rejects the
+ * obvious shapes; this is for reporting how much noise a pattern still lets in.
+ */
+PROSPEKT.looksLikeDate = value => {
+  const s = String(value || "").trim();
+  if (/^(?:19|20)\d{2}\b/.test(s)) return true;                       // leading year
+  if (/\b(?:19|20)\d{2}$/.test(s)) return true;                       // trailing year
+  if (/^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(s)) return true;       // d/m/y
+  if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(s)) return true;         // y-m-d
+  return false;
+};
+
 PROSPEKT.isRoleAddress = value => {
   const at = String(value || "").indexOf("@");
   if (at < 1) return false;
