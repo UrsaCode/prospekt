@@ -14,3 +14,8 @@ desktop.ini
 *.zip
 *.crx
 *.pem
+
+# Test tooling artifacts
+.playwright-mcp/
+*.png
+!icons/*.png

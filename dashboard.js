@@ -31,11 +31,18 @@ const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&
 const esc = value =>
   value === null || value === undefined ? "" : String(value).replace(/[&<>"']/g, c => ESCAPES[c]);
 
-// Only http(s) survives — blocks javascript:/data: URLs harvested from pages.
+// Only absolute http(s) survives — blocks javascript:/data: URLs harvested from
+// pages, and is also what decides whether a row gets an "open" button.
+// Deliberately parsed WITHOUT a base: resolving relative to location.href turned
+// any non-URL value ("ada@site0.com") into a same-origin http URL, so every
+// email and phone row sprouted an open button. That only looked correct in the
+// packaged extension because its base scheme is chrome-extension:.
 function safeUrl(url) {
   if (!url) return "";
+  const raw = String(url).trim();
+  if (!/^https?:\/\//i.test(raw)) return "";
   try {
-    const u = new URL(String(url), location.href);
+    const u = new URL(raw);
     return u.protocol === "http:" || u.protocol === "https:" ? u.href : "";
   } catch {
     return "";
