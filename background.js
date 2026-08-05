@@ -3,7 +3,7 @@
 
 importScripts("defaults.js");
 
-const { SCANS, CONTACTS, SETTINGS, PATTERNS } = PROSPEKT.STORAGE_KEYS;
+const { SCANS, CONTACTS, SETTINGS, PATTERNS, BARREN, METERS } = PROSPEKT.STORAGE_KEYS;
 const DEFAULT_SETTINGS = PROSPEKT.DEFAULT_SETTINGS;
 
 // ── Storage helpers (surface errors instead of failing silently) ────────
@@ -186,7 +186,103 @@ const HANDLERS = {
   skipDomain: msg => serialize(() => setDomainSkipped(msg.domain, true)),
   unskipDomain: msg => serialize(() => setDomainSkipped(msg.domain, false)),
   exportPage: msg => exportPage(msg.tabId).then(csv => ({ csv })),
+  getOverview: () => getOverview(),
+  getBarren: msg => getBarren(msg?.limit),
 };
+
+// ── Overview model ──────────────────────────────────────────────────────
+// One call rather than five round trips, each of which would re-read and
+// re-serialise the whole contacts array.
+async function getOverview() {
+  const d = await get([SCANS, CONTACTS, SETTINGS, BARREN, METERS]);
+  const scans = Array.isArray(d[SCANS]) ? d[SCANS] : [];
+  const contacts = Array.isArray(d[CONTACTS]) ? d[CONTACTS] : [];
+  const barren = Array.isArray(d[BARREN]) ? d[BARREN] : [];
+  const settings = { ...DEFAULT_SETTINGS, ...(d[SETTINGS] || {}) };
+  const meters = d[METERS] || { pagesScanned: 0, pagesProductive: 0 };
+
+  const byType = { email: 0, phone: 0, social: 0, custom: 0 };
+  const perDomain = new Map();
+  const weekAgo = Date.now() - 7 * 86400000;
+  const exportedBefore = settings.lastExportAt?.contacts || null;
+
+  let addedThisWeek = 0;
+  let roleAddresses = 0;
+  let neverExported = 0;
+  let earliest = null;
+
+  for (const c of contacts) {
+    if (byType[c.type] === undefined) byType[c.type] = 0;
+    byType[c.type]++;
+
+    if (c.added_at) {
+      if (new Date(c.added_at).getTime() >= weekAgo) addedThisWeek++;
+      if (!earliest || c.added_at < earliest) earliest = c.added_at;
+    }
+    if (c.type === "email" && PROSPEKT.isRoleAddress(c.value)) roleAddresses++;
+    if (!exportedBefore || !c.added_at || c.added_at > exportedBefore) neverExported++;
+
+    const dom = c.found_at?.domain || "unknown";
+    let agg = perDomain.get(dom);
+    if (!agg) perDomain.set(dom, (agg = { domain: dom, total: 0, email: 0, phone: 0, social: 0, custom: 0, lastSeen: null }));
+    agg.total++;
+    if (agg[c.type] !== undefined) agg[c.type]++;
+    const seen = c.last_seen_at || c.added_at;
+    if (seen && (!agg.lastSeen || seen > agg.lastSeen)) agg.lastSeen = seen;
+  }
+
+  const richestDomains = [...perDomain.values()].sort((a, b) => b.total - a.total).slice(0, 6);
+
+  // Local-day buckets for the last 14 days.
+  const daily = {};
+  const today = new Date();
+  for (let i = 13; i >= 0; i--) {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    daily[localDayKey(day)] = 0;
+  }
+  for (const c of contacts) {
+    if (!c.added_at) continue;
+    const key = localDayKey(new Date(c.added_at));
+    if (key in daily) daily[key]++;
+  }
+
+  const pagesScanned = meters.pagesScanned || 0;
+  const pagesProductive = meters.pagesProductive || 0;
+
+  const latest = contacts.slice(0, 6).map(c => ({
+    type: c.type, value: c.value, label: c.label || null, platform: c.platform || null,
+    source: c.source || null, added_at: c.added_at,
+    domain: c.found_at?.domain || null, pageTitle: c.found_at?.pageTitle || null,
+  }));
+
+  return {
+    totalContacts: contacts.length,
+    totalDomains: perDomain.size,
+    collectingSince: earliest,
+    addedThisWeek,
+    byType,
+    pagesScanned,
+    pagesProductive,
+    hitRate: pagesScanned ? Math.round((pagesProductive / pagesScanned) * 100) : 0,
+    dailyContacts: Object.entries(daily).map(([date, count]) => ({ date, count })),
+    richestDomains,
+    latest,
+    needsALook: {
+      neverExported,
+      lastExportAt: exportedBefore,
+      roleAddresses,
+      barrenDomains: barren.length,
+    },
+    totalScans: scans.reduce((sum, s) => sum + (s.scan_count || 1), 0),
+    autoScan: settings.autoScan !== false,
+  };
+}
+
+async function getBarren(limit = 200) {
+  const d = await get(BARREN);
+  const list = Array.isArray(d[BARREN]) ? d[BARREN] : [];
+  return { items: list.slice(0, limit), total: list.length };
+}
 
 // ── Popup model ─────────────────────────────────────────────────────────
 async function activeTab() {
@@ -483,10 +579,15 @@ async function storeScan(data, tab) {
   // "scanned, found nothing" from "never scanned", and the empty state would be
   // a guess rather than a fact.
   if (data.totalContacts === 0) {
+    await recordBarren(domain, now, settings);
+    await bumpMeters({ scanned: 1, productive: 0 });
     await writePageState(tab?.id, buildPageState(data, counts, [], 0));
     await setBadge(tab, 0);
     return { ok: true, empty: true, newContacts: 0 };
   }
+
+  await clearBarren(domain);
+  await bumpMeters({ scanned: 1, productive: 1 });
 
   const existingIdx = scans.findIndex(s => s?.found_at?.domain === domain);
   let scanId;
@@ -531,30 +632,39 @@ async function storeScan(data, tab) {
   let dropped = [];
   if (scans.length > maxScans) dropped = scans.splice(maxScans);
 
-  // Deduplicate globally. Emails/socials by lowercased value, phones by digits,
-  // custom values scoped to their label so two patterns can both keep a match.
-  const keyFor = (type, value, label) => {
-    if (type === "phone") return "phone:" + String(value).replace(/\D/g, "");
-    if (type === "custom") return `custom:${label || ""}:` + String(value).toLowerCase();
-    return `${type}:` + String(value).toLowerCase();
+  // Deduplicated PER DOMAIN, not globally: the same address found on two sites
+  // is two findings, and the Contacts view flags values that span domains. A
+  // value can therefore appear more than once in the library.
+  const keyFor = (type, value, label, dom) => {
+    const d = String(dom || "").toLowerCase();
+    if (type === "phone") return `${d}|phone:` + String(value).replace(/\D/g, "");
+    if (type === "custom") return `${d}|custom:${label || ""}:` + String(value).toLowerCase();
+    return `${d}|${type}:` + String(value).toLowerCase();
   };
 
-  // Map rather than Set: already-saved rows show when they were first seen.
+  // Only same-domain contacts can collide now, so skip the rest of the library.
   const byKey = new Map();
   for (const c of contacts) {
-    const k = keyFor(c.type, c.value, c.label);
+    if (c.found_at?.domain !== domain) continue;
+    const k = keyFor(c.type, c.value, c.label, domain);
     if (!byKey.has(k)) byKey.set(k, c);
   }
-  const known = new Set(byKey.keys());
   const pageRows = [];
   const newContacts = [];
   let seq = 0;
+  const MAX_PAGES_PER_CONTACT = 25;
+
   const mkContact = (type, value, extra) => ({
     id: `c_${Date.now()}_${(seq++).toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     type,
     value,
     ...extra,
     added_at: now,
+    last_seen_at: now,
+    // Distinct pages this value appeared on. pageCount stays exact; the sampled
+    // list is capped so a value on a 10k-page site can't bloat the record.
+    pageCount: 1,
+    pages: [data.meta.url],
     found_at: {
       url: data.meta.url,
       domain,
@@ -565,15 +675,27 @@ async function storeScan(data, tab) {
     scanId,
   });
 
-  // Every hit becomes a row for the popup; only novel ones enter the library.
-  // The new/saved split is a byproduct of this pass, not a second one.
+  // Every hit becomes a row for the popup. Novel ones enter the library; repeats
+  // now update the existing record (previously a repeat was simply discarded,
+  // so "last seen" and "times seen" could never be known).
   const add = (type, item, extra) => {
-    const key = keyFor(type, item.value, item.label);
-    const isNew = !known.has(key);
+    const key = keyFor(type, item.value, item.label, domain);
+    const existing = byKey.get(key);
+    const isNew = !existing;
+
     if (isNew) {
-      known.add(key);
-      newContacts.push(mkContact(type, item.value, extra));
+      const created = mkContact(type, item.value, extra);
+      byKey.set(key, created);
+      newContacts.push(created);
+    } else {
+      existing.last_seen_at = now;
+      if (!Array.isArray(existing.pages)) existing.pages = [];
+      if (!existing.pages.includes(data.meta.url)) {
+        existing.pageCount = (existing.pageCount || existing.pages.length || 1) + 1;
+        if (existing.pages.length < MAX_PAGES_PER_CONTACT) existing.pages.push(data.meta.url);
+      }
     }
+
     pageRows.push({
       type,
       value: item.value,
@@ -581,7 +703,7 @@ async function storeScan(data, tab) {
       platform: item.platform || extra.platform || null,
       source: item.source || extra.source || null,
       isNew,
-      savedAt: isNew ? null : (byKey.get(key)?.added_at || null),
+      savedAt: isNew ? null : (existing.added_at || null),
     });
   };
 
@@ -640,6 +762,39 @@ async function recordStorageWarning(warning) {
   }
 }
 
+// ── Barren domains + meters ─────────────────────────────────────────────
+async function recordBarren(domain, now, settings) {
+  const d = await get(BARREN);
+  const list = Array.isArray(d[BARREN]) ? d[BARREN] : [];
+  const idx = list.findIndex(b => b.domain === domain);
+  if (idx !== -1) {
+    list[idx].attempts = (list[idx].attempts || 1) + 1;
+    list[idx].lastSeen = now;
+    list.unshift(list.splice(idx, 1)[0]);
+  } else {
+    list.unshift({ domain, attempts: 1, firstSeen: now, lastSeen: now });
+  }
+  const max = clampInt(settings?.maxBarren, 100, 50000, DEFAULT_SETTINGS.maxBarren);
+  if (list.length > max) list.length = max;
+  await set({ [BARREN]: list });
+}
+
+// A domain that produces something is no longer barren.
+async function clearBarren(domain) {
+  const d = await get(BARREN);
+  const list = Array.isArray(d[BARREN]) ? d[BARREN] : [];
+  if (!list.some(b => b.domain === domain)) return;
+  await set({ [BARREN]: list.filter(b => b.domain !== domain) });
+}
+
+async function bumpMeters({ scanned = 0, productive = 0 }) {
+  const d = await get(METERS);
+  const m = d[METERS] || { pagesScanned: 0, pagesProductive: 0 };
+  m.pagesScanned = (m.pagesScanned || 0) + scanned;
+  m.pagesProductive = (m.pagesProductive || 0) + productive;
+  await set({ [METERS]: m });
+}
+
 function clampInt(value, min, max, fallback) {
   const n = parseInt(value, 10);
   if (Number.isNaN(n)) return fallback;
@@ -670,9 +825,51 @@ async function getScans(filters = {}) {
   return { items: scans, total };
 }
 
+/** Normalised identity used only to spot the same value across domains. */
+function valueIdentity(c) {
+  const v = String(c.value || "").toLowerCase();
+  if (c.type === "phone") return "phone:" + v.replace(/\D/g, "");
+  if (c.type === "custom") return `custom:${c.label || ""}:${v}`;
+  return `${c.type}:${v}`;
+}
+
 async function getContacts(filters = {}) {
-  const d = await get(CONTACTS);
+  const d = await get([CONTACTS, SETTINGS]);
   let contacts = Array.isArray(d[CONTACTS]) ? d[CONTACTS] : [];
+  const settings = { ...DEFAULT_SETTINGS, ...(d[SETTINGS] || {}) };
+  const exportedBefore = settings.lastExportAt?.contacts || null;
+
+  // Contacts are deduplicated per domain, so the same value can legitimately
+  // appear under several domains. Computed over the whole library before any
+  // filtering, or a filtered view would under-report.
+  const domainsPerValue = new Map();
+  for (const c of contacts) {
+    const id = valueIdentity(c);
+    let set = domainsPerValue.get(id);
+    if (!set) domainsPerValue.set(id, (set = new Set()));
+    set.add(c.found_at?.domain || "");
+  }
+
+  const enrich = c => {
+    const domains = domainsPerValue.get(valueIdentity(c));
+    const spread = domains ? domains.size : 1;
+    return {
+      ...c,
+      isRole: c.type === "email" && PROSPEKT.isRoleAddress(c.value),
+      isDuplicate: spread > 1,
+      domainSpread: spread,
+      exported: !!(exportedBefore && c.added_at && c.added_at <= exportedBefore),
+      exportedAt: exportedBefore,
+    };
+  };
+
+  contacts = contacts.map(enrich);
+
+  if (filters.notExported) contacts = contacts.filter(c => !c.exported);
+  if (filters.hideRole) contacts = contacts.filter(c => !c.isRole);
+  if (filters.duplicatesOnly) contacts = contacts.filter(c => c.isDuplicate);
+  if (filters.sort === "oldest") contacts = [...contacts].reverse();
+
   if (filters.type) contacts = contacts.filter(c => c.type === filters.type);
   if (filters.domain) contacts = contacts.filter(c => c.found_at?.domain === filters.domain);
   if (filters.search) {
@@ -795,6 +992,17 @@ async function exportCSV(type = "contacts") {
   const key = type === "scans" ? SCANS : CONTACTS;
   const d = await get(key);
   const rows = Array.isArray(d[key]) ? d[key] : [];
+
+  // Stamp the export so the dashboard can report what has been collected since.
+  // One timestamp per type rather than a field on every contact: far cheaper,
+  // and reads the same. Caveat: exporting a filtered subset still counts as
+  // having exported everything up to now.
+  serialize(async () => {
+    const current = await getSettings();
+    await set({
+      [SETTINGS]: { ...current, lastExportAt: { ...(current.lastExportAt || {}), [type]: new Date().toISOString() } },
+    });
+  }).catch(err => console.warn("[Prospekt] could not stamp export:", err.message));
 
   if (type === "scans") {
     let csv = csvRow(["Domain", "Site Name", "Emails", "Phones", "Socials", "Custom", "Total", "Scan Count", "First Seen", "Last Scanned", "URL"]);

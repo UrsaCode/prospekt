@@ -41,7 +41,7 @@
       </button>
       <button type="button" class="nav-item" data-page="scans">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        <span class="nav-label">Scan History</span>
+        <span class="nav-label">Scan history</span>
         <span class="nav-count" id="navScanCount">0</span>
       </button>
       <button type="button" class="nav-item" data-page="insights">
@@ -57,7 +57,8 @@
     <div class="sidebar-footer">
       <div class="sidebar-stat">
         <span class="sidebar-stat-label">Auto-scan</span>
-        <span class="sidebar-stat-value" id="autoScanStatus">—</span>
+        <button type="button" class="toggle toggle-sm" id="autoScanToggle"
+                role="switch" aria-checked="true" aria-label="Auto-scan"></button>
       </div>
     </div>
   </aside>
@@ -65,15 +66,18 @@
   <!-- Main Content -->
   <main class="main">
     <header class="topbar">
-      <h1 class="page-title" id="pageTitle" tabindex="-1">Overview</h1>
+      <div class="topbar-title">
+        <h1 class="page-title" id="pageTitle" tabindex="-1">Overview</h1>
+        <span class="page-subtitle" id="pageSubtitle"></span>
+      </div>
       <div class="topbar-actions">
         <div class="search-global">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input type="search" id="globalSearch" placeholder="Search contacts, domains…" aria-label="Search contacts and domains">
+          <input type="search" id="globalSearch" placeholder="Search contacts and domains" aria-label="Search contacts and domains">
         </div>
         <button type="button" class="btn btn-accent" id="exportContactsBtn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Export CSV
+          Export all
         </button>
       </div>
     </header>

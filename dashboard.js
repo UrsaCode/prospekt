@@ -165,6 +165,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupNav();
   setupSearch();
   setupExport();
+  setupAutoScanToggle();
   reflectAutoScan();
   if (!routeFromHash()) renderPage("overview");
 });
@@ -176,10 +177,24 @@ chrome.runtime.onMessage?.addListener?.(msg => {
 });
 
 function reflectAutoScan() {
-  const el = document.getElementById("autoScanStatus");
+  const btn = document.getElementById("autoScanToggle");
   const on = prefs.autoScan !== false;
-  el.textContent = on ? "Active" : "Paused";
-  el.classList.toggle("is-paused", !on);
+  btn.classList.toggle("on", on);
+  btn.setAttribute("aria-checked", String(on));
+  btn.title = on ? "Auto-scan is on — click to pause" : "Auto-scan is paused — click to resume";
+}
+
+function setupAutoScanToggle() {
+  document.getElementById("autoScanToggle").addEventListener("click", async () => {
+    const next = prefs.autoScan === false;
+    const saved = await bg({ action: "saveSettings", settings: { autoScan: next } });
+    if (failed(saved) || !saved) return toast("Couldn't change that");
+    prefs = saved;
+    reflectAutoScan();
+    toast(next ? "Auto-scan resumed" : "Auto-scan paused");
+    // Settings page mirrors the same switch.
+    if (state.page === "settings") renderPage("settings");
+  });
 }
 
 function setupNav() {
@@ -239,8 +254,11 @@ async function renderPage(page) {
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.getElementById(`page-${page}`).classList.add("active");
 
-  const titles = { overview: "Overview", contacts: "Contacts", scans: "Scan History", insights: "Insights", settings: "Settings" };
+  const titles = { overview: "Overview", contacts: "Contacts", scans: "Scan history", insights: "Insights", settings: "Settings" };
   document.getElementById("pageTitle").textContent = titles[page] || page;
+  // Each renderer fills its own subtitle; clear it so a stale one never carries
+  // across pages.
+  document.getElementById("pageSubtitle").textContent = "";
 
   // Search only applies to two pages — leaving a stale query visible on the
   // others made the numbers look wrong.
@@ -252,7 +270,7 @@ async function renderPage(page) {
   document.getElementById("navScanCount").textContent = num(stats?.totalScans);
 
   switch (page) {
-    case "overview": return renderOverview(stats);
+    case "overview": return renderOverview();
     case "contacts": return renderContacts();
     case "scans": return renderScans();
     case "insights": return renderInsights(stats);
@@ -279,78 +297,174 @@ function sparkline(dailyScans) {
 // ══════════════════════════════════════════════════════════════════════════
 // OVERVIEW
 // ══════════════════════════════════════════════════════════════════════════
-async function renderOverview(stats) {
-  const s = { ...EMPTY_STATS, ...(stats || await bg({ action: "getStats" }) || {}) };
-  const res = await bg({ action: "getContacts", filters: { limit: 6 } });
-  const recent = res?.items || [];
+const TYPE_META = [
+  { key: "email", label: "Emails", plural: "emails" },
+  { key: "phone", label: "Phones", plural: "phones" },
+  { key: "social", label: "Socials", plural: "socials" },
+  { key: "custom", label: "Custom", plural: "customs" },
+];
 
+const shortDate = iso => (iso
+  ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" })
+  : "—");
+
+async function renderOverview() {
   const el = document.getElementById("page-overview");
+  const o = await bg({ action: "getOverview" });
+
+  if (!o) {
+    el.innerHTML = emptyState("⚠️", "Couldn't load your library",
+      "The background worker didn't respond. Reload this page to try again.");
+    return;
+  }
+
+  document.getElementById("pageSubtitle").textContent =
+    o.collectingSince ? `collecting since ${shortDate(o.collectingSince)}` : "nothing collected yet";
+
+  if (!o.totalContacts) {
+    el.innerHTML = emptyState("📭", "Nothing collected yet",
+      "Browse a few sites and Prospekt will start keeping what it finds. Everything stays on this device.");
+    return;
+  }
+
+  const maxDay = Math.max(...o.dailyContacts.map(d => d.count), 1);
+  const splitBar = TYPE_META
+    .filter(t => o.byType[t.key] > 0)
+    .map(t => `<i style="flex:${o.byType[t.key]};background:var(--${t.key})"></i>`).join("");
+
+  const pct = n => (o.totalContacts ? Math.round((n / o.totalContacts) * 100) : 0);
+
   el.innerHTML = `
-    <div class="stat-grid">
-      ${statCard("Total Contacts", s.totalContacts, "accent")}
-      ${statCard("Emails", s.emails, "purple")}
-      ${statCard("Socials", s.socials, "blue")}
-      ${statCard("Domains Scanned", s.totalDomains, "amber")}
-    </div>
-
-    <div class="grid-2col">
-      <section>
-        <div class="section-header">
-          <h2 class="section-title">Recent Contacts</h2>
-          <button type="button" class="section-action" data-goto="contacts">View all →</button>
+    <div class="ov-grid">
+      <section class="panel">
+        <div class="panel-hd">
+          <h2>The collection</h2>
+          <button type="button" class="panel-link" data-goto="contacts">Browse all →</button>
         </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr><th>Type</th><th>Value</th><th>Found on</th><th>When</th></tr></thead>
-            <tbody>${recent.length ? recent.map(c => `
-              <tr>
-                <td>${typeChip(c)}</td>
-                <td class="cell-value">${esc(truncate(c.value, 32))}</td>
-                <td>${domainCell(c.found_at?.domain, c.found_at?.favicon)}</td>
-                <td class="cell-time" title="${esc(fullDate(c.added_at))}">${esc(timeAgo(c.added_at))}</td>
-              </tr>`).join("")
-              : `<tr><td colspan="4" class="cell-empty">No contacts yet — browse a few sites and they'll appear here.</td></tr>`}
-            </tbody>
-          </table>
+        <div class="panel-body" style="padding-bottom:0">
+          <div class="coll-top">
+            <div class="coll-n">${num(o.totalContacts)}</div>
+            <div class="coll-lbl">Contacts kept<br>across ${num(o.totalDomains)} domains</div>
+            <div class="coll-delta">
+              <b>${o.addedThisWeek ? "+" + num(o.addedThisWeek) : "0"}</b>
+              <span>this week</span>
+            </div>
+          </div>
+          <div class="split-bar">${splitBar}</div>
+        </div>
+        <div class="split-cells">
+          ${TYPE_META.map(t => `
+            <div class="split-cell">
+              <div class="k"><i style="background:var(--${t.key})"></i>${esc(t.label)}</div>
+              <div><span class="v">${num(o.byType[t.key] || 0)}</span><span class="p">${pct(o.byType[t.key] || 0)}%</span></div>
+            </div>`).join("")}
         </div>
       </section>
 
-      <section>
-        <div class="section-header"><h2 class="section-title">Activity (Last 7 Days)</h2></div>
-        <div class="chart-card chart-card-flush">
-          <div class="mini-chart">${sparkline(s.dailyScans)}</div>
-          <div class="chart-footnote">${num(s.totalScans)} total scans across ${num(s.totalDomains)} domains</div>
+      <section class="panel">
+        <div class="panel-hd"><h2>Hit rate</h2></div>
+        <div class="panel-body">
+          <div class="hit-n">${o.hitRate}%</div>
+          <p class="hit-copy">of the ${num(o.pagesScanned)} page${o.pagesScanned === 1 ? "" : "s"}
+             you've browsed gave up at least one contact.</p>
+          <div class="spark">
+            ${o.dailyContacts.map((d, i) => `<i class="${i === o.dailyContacts.length - 1 ? "now" : ""}"
+                 style="height:${Math.max(4, (d.count / maxDay) * 100)}%"
+                 title="${esc(d.count)} on ${esc(d.date)}"></i>`).join("")}
+          </div>
+          <div class="spark-axis"><span>14 days ago</span><span>today</span></div>
         </div>
       </section>
     </div>
+
+    <div class="ov-grid-2">
+      <section class="panel">
+        <div class="panel-hd">
+          <h2>Richest domains</h2>
+          <button type="button" class="panel-link" data-goto="scans">Full history →</button>
+        </div>
+        ${o.richestDomains.map(d => {
+          const bar = TYPE_META.filter(t => d[t.key] > 0)
+            .map(t => `<i style="flex:${d[t.key]};background:var(--${t.key})"></i>`).join("");
+          return `<div class="dom-row">
+            ${favCell(d.domain, null)}
+            <div class="dom-main">
+              <div class="dom-name">${esc(d.domain)}</div>
+              <div class="dom-bar" style="width:${Math.max(30, (d.total / o.richestDomains[0].total) * 100)}%">${bar}</div>
+            </div>
+            <div class="dom-n">${num(d.total)}</div>
+            <div class="dom-when">${esc(timeAgo(d.lastSeen))}</div>
+          </div>`;
+        }).join("")}
+      </section>
+
+      <section class="panel">
+        <div class="panel-hd">
+          <h2>Latest finds</h2>
+          <button type="button" class="panel-link" id="copyLatest">Copy newest ${o.latest.length}</button>
+        </div>
+        ${o.latest.map(f => {
+          const kind = f.type === "social" ? (f.platform || "social")
+            : f.type === "custom" ? (f.label || "custom") : f.type;
+          const meta = [kind, f.domain, f.source].filter(Boolean).map(esc).join(" · ");
+          return `<div class="find-row">
+            <span class="find-dot" style="background:var(--${TYPE_META.some(t => t.key === f.type) ? f.type : "email"})"></span>
+            <div class="find-main">
+              <div class="find-val">${esc(f.value)}</div>
+              <div class="find-meta">${meta}</div>
+            </div>
+            <div class="find-when">${esc(timeAgo(f.added_at))}</div>
+          </div>`;
+        }).join("")}
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-hd"><h2>Needs a look</h2></div>
+      <div class="look">
+        <div class="look-cell">
+          <h3><b>${num(o.needsALook.neverExported)}</b> contacts never exported</h3>
+          <p>${o.needsALook.lastExportAt
+              ? `Collected since your last CSV on ${esc(shortDate(o.needsALook.lastExportAt))}. Export them before you clear old scan records.`
+              : `You haven't exported anything yet. Take a copy before you clear old scan records.`}</p>
+          <button type="button" class="btn btn-accent btn-sm" id="lookExport">Export these</button>
+        </div>
+        <div class="look-cell">
+          <h3><b>${num(o.needsALook.roleAddresses)}</b> role addresses</h3>
+          <p>info@, sales@, support@ and similar. Useful for some outreach, dead weight for most.</p>
+          <button type="button" class="btn btn-sm" id="lookRole">Review them</button>
+        </div>
+        <div class="look-cell">
+          <h3><b>${num(o.needsALook.barrenDomains)}</b> domains gave nothing</h3>
+          <p>Scanned repeatedly with zero matches. Either skip them or widen your extraction patterns.</p>
+          <button type="button" class="btn btn-sm" id="lookPatterns">Tune patterns</button>
+        </div>
+      </div>
+    </section>
   `;
 
   attachFaviconFallbacks(el);
-  el.querySelectorAll("[data-goto]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelector(`.nav-item[data-page="${btn.dataset.goto}"]`)?.click();
-    });
+  el.querySelectorAll("[data-goto]").forEach(b =>
+    b.addEventListener("click", () => document.querySelector(`.nav-item[data-page="${b.dataset.goto}"]`)?.click()));
+
+  el.querySelector("#copyLatest")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(o.latest.map(f => f.value).join("\n"));
+      toast(`Copied ${o.latest.length} contacts`);
+    } catch { toast("Clipboard blocked by the browser"); }
+  });
+  el.querySelector("#lookExport")?.addEventListener("click", () => doExport("contacts"));
+  el.querySelector("#lookRole")?.addEventListener("click", () => {
+    state.contactFilter = "email";
+    state.roleOnly = true;
+    document.querySelector('.nav-item[data-page="contacts"]').click();
+  });
+  el.querySelector("#lookPatterns")?.addEventListener("click", () => {
+    location.hash = "settings";
+    document.querySelector('.nav-item[data-page="settings"]').click();
   });
 }
 
-const statCard = (label, value, tone) => `
-  <div class="stat-card">
-    <div class="stat-card-label"><span class="dot dot-${tone}"></span> ${esc(label)}</div>
-    <div class="stat-card-value tone-${tone}">${num(value)}</div>
-  </div>`;
-
-const truncate = (s, n) => {
-  const str = String(s ?? "");
-  return str.length > n ? str.slice(0, n) + "…" : str;
-};
-
-function typeChip(c) {
-  const type = TYPES.includes(c.type) ? c.type : "other";
-  const text = c.type === "social" ? (c.platform || "social")
-    : c.type === "custom" ? (c.label || "custom")
-    : c.type;
-  return `<span class="cell-type type-${esc(type)}" title="${esc(c.type)}">${esc(truncate(text, 18))}</span>`;
-}
 
 // ══════════════════════════════════════════════════════════════════════════
 // CONTACTS
