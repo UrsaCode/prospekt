@@ -188,7 +188,33 @@ const HANDLERS = {
   exportPage: msg => exportPage(msg.tabId).then(csv => ({ csv })),
   getOverview: () => getOverview(),
   getBarren: msg => getBarren(msg?.limit),
+  deleteContacts: msg => serialize(() => deleteContacts(msg.ids)),
+  exportSelection: msg => exportSelection(msg.ids).then(csv => ({ csv })),
 };
+
+async function deleteContacts(ids) {
+  const wanted = new Set(ids || []);
+  if (!wanted.size) return { ok: false, reason: "no_ids" };
+  const d = await get(CONTACTS);
+  const before = (d[CONTACTS] || []).length;
+  const contacts = (d[CONTACTS] || []).filter(c => !wanted.has(c.id));
+  await set({ [CONTACTS]: contacts });
+  return { ok: true, removed: before - contacts.length };
+}
+
+async function exportSelection(ids) {
+  const wanted = new Set(ids || []);
+  const d = await get(CONTACTS);
+  const rows = (d[CONTACTS] || []).filter(c => wanted.has(c.id));
+  let csv = csvRow(["Type", "Value", "Label", "Platform", "Source", "Context",
+    "Domain", "Site Name", "Page Title", "Page URL", "Added At", "Last Seen", "Pages"]);
+  for (const c of rows) {
+    csv += csvRow([c.type, c.value, c.label, c.platform, c.source, c.context,
+      c.found_at?.domain, c.found_at?.siteName, c.found_at?.pageTitle, c.found_at?.url,
+      c.added_at, c.last_seen_at, c.pageCount || 1]);
+  }
+  return csv;
+}
 
 // ── Overview model ──────────────────────────────────────────────────────
 // One call rather than five round trips, each of which would re-read and
@@ -867,10 +893,8 @@ async function getContacts(filters = {}) {
 
   if (filters.notExported) contacts = contacts.filter(c => !c.exported);
   if (filters.hideRole) contacts = contacts.filter(c => !c.isRole);
+  if (filters.rolesOnly) contacts = contacts.filter(c => c.isRole);
   if (filters.duplicatesOnly) contacts = contacts.filter(c => c.isDuplicate);
-  if (filters.sort === "oldest") contacts = [...contacts].reverse();
-
-  if (filters.type) contacts = contacts.filter(c => c.type === filters.type);
   if (filters.domain) contacts = contacts.filter(c => c.found_at?.domain === filters.domain);
   if (filters.search) {
     const q = String(filters.search).toLowerCase();
@@ -882,6 +906,22 @@ async function getContacts(filters = {}) {
       (c.platform || "").toLowerCase().includes(q) ||
       (c.label || "").toLowerCase().includes(q));
   }
+  // Counted before the type filter so the chips can show what switching to
+  // another type would give you, under the filters currently applied.
+  const typeCounts = { all: contacts.length, email: 0, phone: 0, social: 0, custom: 0 };
+  for (const c of contacts) if (typeCounts[c.type] !== undefined) typeCounts[c.type]++;
+
+  if (filters.type) contacts = contacts.filter(c => c.type === filters.type);
+
+  if (filters.sort === "oldest") {
+    contacts = [...contacts].sort((a, b) => String(a.added_at).localeCompare(String(b.added_at)));
+  } else if (filters.sort === "domain") {
+    contacts = [...contacts].sort((a, b) =>
+      String(a.found_at?.domain).localeCompare(String(b.found_at?.domain))
+      || String(b.added_at).localeCompare(String(a.added_at)));
+  }
+  // Default order is storage order, which is already newest-first.
+
   const total = contacts.length;
   if (filters.limit) {
     const offset = Math.max(0, filters.offset || 0);
@@ -889,7 +929,7 @@ async function getContacts(filters = {}) {
   }
   // Always the same shape. Paging happens here so the dashboard never has to
   // ship the whole contact list across the message channel to render 30 rows.
-  return { items: contacts, total };
+  return { items: contacts, total, typeCounts };
 }
 
 async function getStats() {

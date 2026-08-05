@@ -10,6 +10,12 @@ const state = {
   scanPage: 1,
   search: "",
   patternsDirty: false,
+  contactSort: "newest",
+  notExported: false,
+  hideRole: false,
+  duplicatesOnly: false,
+  rolesOnly: false,
+  selected: new Set(),
 };
 
 let prefs = { ...PROSPEKT.DEFAULT_SETTINGS };
@@ -166,6 +172,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupSearch();
   setupExport();
   setupAutoScanToggle();
+  setupDrawer();
   reflectAutoScan();
   if (!routeFromHash()) renderPage("overview");
 });
@@ -297,6 +304,27 @@ function sparkline(dailyScans) {
 // ══════════════════════════════════════════════════════════════════════════
 // OVERVIEW
 // ══════════════════════════════════════════════════════════════════════════
+const truncate = (s, n) => {
+  const str = String(s ?? "");
+  return str.length > n ? str.slice(0, n) + "…" : str;
+};
+
+/** Coloured type pill. Falls back to a known literal so the class is never
+ *  built from an unvalidated value. */
+function typeChip(c) {
+  const type = TYPES.includes(c.type) ? c.type : "other";
+  const text = c.type === "social" ? (c.platform || "social")
+    : c.type === "custom" ? (c.label || "custom")
+    : c.type;
+  return `<span class="cell-type type-${esc(type)}" title="${esc(c.type)}">${esc(truncate(text, 18))}</span>`;
+}
+
+const statCard = (label, value, tone) => `
+  <div class="stat-card">
+    <div class="stat-card-label"><span class="dot dot-${tone}"></span> ${esc(label)}</div>
+    <div class="stat-card-value tone-${tone}">${num(value)}</div>
+  </div>`;
+
 const TYPE_META = [
   { key: "email", label: "Emails", plural: "emails" },
   { key: "phone", label: "Phones", plural: "phones" },
@@ -469,11 +497,39 @@ async function renderOverview() {
 // ══════════════════════════════════════════════════════════════════════════
 // CONTACTS
 // ══════════════════════════════════════════════════════════════════════════
+// A value found in the last hour still reads as "just came in".
+const NEW_WINDOW_MS = 3600000;
+const isFresh = iso => !!iso && (Date.now() - new Date(iso).getTime()) < NEW_WINDOW_MS;
+
+const CT_TOGGLES = [
+  { key: "notExported", label: "Not exported" },
+  { key: "hideRole", label: "Hide role addresses" },
+  { key: "duplicatesOnly", label: "Duplicates only" },
+  { key: "rolesOnly", label: "Role addresses only" },
+];
+
+const SORTS = [
+  { key: "newest", label: "Newest first" },
+  { key: "oldest", label: "Oldest first" },
+  { key: "domain", label: "By domain" },
+];
+
+// id -> contact, so the drawer can open without another round trip.
+let contactsOnScreen = new Map();
+
+function contactFilters() {
+  const f = {};
+  if (state.contactFilter !== "all") f.type = state.contactFilter;
+  if (state.search) f.search = state.search;
+  for (const t of CT_TOGGLES) if (state[t.key]) f[t.key] = true;
+  if (state.contactSort && state.contactSort !== "newest") f.sort = state.contactSort;
+  return f;
+}
+
 async function renderContacts() {
   const el = document.getElementById("page-contacts");
-  const filters = { limit: PER_PAGE, offset: (state.contactPage - 1) * PER_PAGE };
-  if (state.contactFilter !== "all") filters.type = state.contactFilter;
-  if (state.search) filters.search = state.search;
+  const base = contactFilters();
+  const filters = { ...base, limit: PER_PAGE, offset: (state.contactPage - 1) * PER_PAGE };
 
   let res = await bg({ action: "getContacts", filters });
   let total = res?.total || 0;
@@ -488,44 +544,80 @@ async function renderContacts() {
   }
 
   const rows = res?.items || [];
+  const counts = res?.typeCounts || {};
   const start = (state.contactPage - 1) * PER_PAGE;
 
+  contactsOnScreen = new Map(rows.map(c => [c.id, c]));
+  // Drop selections that are no longer on screen so the bulk bar can't act on
+  // rows the user can't see.
+  state.selected = new Set([...(state.selected || [])].filter(id => contactsOnScreen.has(id)));
+
+  document.getElementById("pageSubtitle").textContent = `${num(total)} kept`;
+
+  const chip = (key, label, tone) => `
+    <button type="button" class="ct-chip ${state.contactFilter === key ? "on" : ""}" data-filter="${key}">
+      ${tone ? `<i style="background:var(--${tone})"></i>` : ""}${esc(label)}
+      <b>${num(counts[key] ?? 0)}</b>
+    </button>`;
+
+  const selCount = state.selected.size;
+
   el.innerHTML = `
-    <div class="filter-tabs" role="tablist" aria-label="Contact type">
-      ${TYPES.map(t => `
-        <button type="button" role="tab" class="filter-tab ${state.contactFilter === t ? "active" : ""}"
-                aria-selected="${state.contactFilter === t}" data-filter="${t}">
-          ${t === "all" ? "All" : esc(t.charAt(0).toUpperCase() + t.slice(1) + "s")}
+    <div class="ct-bar">
+      <div class="ct-chips">
+        ${chip("all", "All")}
+        ${TYPE_META.map(t => chip(t.key, t.label.replace(/s$/, ""), t.key)).join("")}
+      </div>
+      ${CT_TOGGLES.map(t => `
+        <button type="button" class="ct-toggle ${state[t.key] ? "on" : ""}" data-toggle="${t.key}">
+          <span class="sign">${state[t.key] ? "−" : "+"}</span> ${esc(t.label)}
         </button>`).join("")}
+      <div class="ct-sort">
+        <select id="ctSort" aria-label="Sort contacts">
+          ${SORTS.map(s => `<option value="${s.key}" ${state.contactSort === s.key ? "selected" : ""}>${esc(s.label)}</option>`).join("")}
+        </select>
+      </div>
     </div>
 
-    ${total === 0 ? emptyState("📭", "No contacts found",
-        state.search ? "Nothing matches that search." : "Browse some websites and contacts will appear automatically.") : `
+    ${selCount ? `
+      <div class="bulk">
+        <b>${num(selCount)}</b> selected
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-sm btn-accent" id="bulkExport">Export selected</button>
+        <button type="button" class="btn btn-sm btn-danger" id="bulkDelete">Delete selected</button>
+        <button type="button" class="btn btn-sm btn-ghost" id="bulkClear">Clear</button>
+      </div>` : ""}
+
+    ${total === 0 ? emptyState("📭", "No contacts match",
+        state.search || CT_TOGGLES.some(t => state[t.key])
+          ? "Try clearing a filter or searching for something else."
+          : "Browse some websites and contacts will appear automatically.") : `
     <div class="table-wrap">
       <table class="data-table">
         <thead>
           <tr>
-            <th style="width:110px">Type</th>
+            <th class="cell-check"><input type="checkbox" class="check" id="selAll"
+                ${rows.length && rows.every(r => state.selected.has(r.id)) ? "checked" : ""}
+                aria-label="Select all on this page"></th>
+            <th style="width:104px">Type</th>
             <th>Value</th>
-            <th style="width:170px">Domain</th>
-            <th>Page</th>
-            <th style="width:100px">Found</th>
-            <th style="width:96px"><span class="sr-only">Actions</span></th>
+            <th style="width:190px">Domain</th>
+            <th style="width:220px">Found on</th>
+            <th style="width:104px">When</th>
           </tr>
         </thead>
         <tbody>
           ${rows.map(c => `
-            <tr data-id="${esc(c.id)}">
+            <tr class="row-click ${state.selected.has(c.id) ? "is-selected" : ""}" data-id="${esc(c.id)}">
+              <td class="cell-check">
+                <input type="checkbox" class="check row-check" data-id="${esc(c.id)}"
+                  ${state.selected.has(c.id) ? "checked" : ""} aria-label="Select ${esc(c.value)}">
+              </td>
               <td>${typeChip(c)}</td>
-              <td class="cell-value">${esc(c.value)}</td>
+              <td class="cell-value">${esc(c.value)}${badgesFor(c)}</td>
               <td>${domainCell(c.found_at?.domain, c.found_at?.favicon)}</td>
               <td class="cell-page" title="${esc(c.found_at?.pageTitle || "")}">${esc(c.found_at?.pageTitle || "—")}</td>
               <td class="cell-time" title="${esc(fullDate(c.added_at))}">${esc(timeAgo(c.added_at))}</td>
-              <td class="cell-actions">
-                <button type="button" class="cell-btn copy-btn" data-copy="${esc(c.value)}" title="Copy" aria-label="Copy value">${IC.copy}</button>
-                ${safeUrl(c.value) ? `<button type="button" class="cell-btn open-btn" data-url="${esc(safeUrl(c.value))}" title="Open" aria-label="Open link">${IC.link}</button>` : ""}
-                <button type="button" class="cell-btn del del-btn" data-id="${esc(c.id)}" title="Delete" aria-label="Delete contact">${IC.trash}</button>
-              </td>
             </tr>`).join("")}
         </tbody>
       </table>
@@ -535,18 +627,80 @@ async function renderContacts() {
   `;
 
   attachFaviconFallbacks(el);
+  wireContacts(el);
+}
 
-  el.querySelectorAll(".filter-tab").forEach(btn => {
-    btn.addEventListener("click", () => {
-      state.contactFilter = btn.dataset.filter;
-      state.contactPage = 1;
-      renderContacts();
-    });
+function badgesFor(c) {
+  let out = "";
+  if (isFresh(c.added_at)) out += `<span class="badge badge-new">New</span>`;
+  if (c.isRole) out += `<span class="badge badge-role">Role</span>`;
+  if (c.isDuplicate) out += `<span class="badge badge-dup">Duplicate</span>`;
+  return out;
+}
+
+function wireContacts(el) {
+  el.querySelectorAll(".ct-chip").forEach(b => b.addEventListener("click", () => {
+    state.contactFilter = b.dataset.filter;
+    state.contactPage = 1;
+    renderContacts();
+  }));
+
+  el.querySelectorAll("[data-toggle]").forEach(b => b.addEventListener("click", () => {
+    const key = b.dataset.toggle;
+    state[key] = !state[key];
+    // "Hide role addresses" and "Role addresses only" contradict each other.
+    if (key === "hideRole" && state.hideRole) state.rolesOnly = false;
+    if (key === "rolesOnly" && state.rolesOnly) state.hideRole = false;
+    state.contactPage = 1;
+    renderContacts();
+  }));
+
+  el.querySelector("#ctSort")?.addEventListener("change", e => {
+    state.contactSort = e.target.value;
+    state.contactPage = 1;
+    renderContacts();
   });
+
   el.querySelector("#cPrev")?.addEventListener("click", () => { state.contactPage--; renderContacts(); });
   el.querySelector("#cNext")?.addEventListener("click", () => { state.contactPage++; renderContacts(); });
 
-  attachActions(el);
+  el.querySelector("#selAll")?.addEventListener("change", e => {
+    const ids = [...contactsOnScreen.keys()];
+    if (e.target.checked) ids.forEach(id => state.selected.add(id));
+    else ids.forEach(id => state.selected.delete(id));
+    renderContacts();
+  });
+
+  el.querySelectorAll(".row-check").forEach(box => box.addEventListener("click", e => {
+    e.stopPropagation();                       // don't open the drawer
+    const id = box.dataset.id;
+    if (box.checked) state.selected.add(id); else state.selected.delete(id);
+    box.closest("tr")?.classList.toggle("is-selected", box.checked);
+    renderContacts();
+  }));
+
+  el.querySelectorAll("tr.row-click").forEach(tr => tr.addEventListener("click", () => {
+    openDrawer(tr.dataset.id);
+  }));
+
+  el.querySelector("#bulkClear")?.addEventListener("click", () => { state.selected.clear(); renderContacts(); });
+
+  el.querySelector("#bulkExport")?.addEventListener("click", async () => {
+    const res = await bg({ action: "exportSelection", ids: [...state.selected] });
+    if (!res?.csv) return toast("Export failed");
+    downloadFile(res.csv, "prospekt-selection.csv");
+    toast(`Exported ${state.selected.size} contacts`);
+  });
+
+  el.querySelector("#bulkDelete")?.addEventListener("click", async () => {
+    const n = state.selected.size;
+    if (!confirm(`Delete ${n} selected contact${n === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    const res = await bg({ action: "deleteContacts", ids: [...state.selected] });
+    if (!res?.ok) return toast("Delete failed");
+    state.selected.clear();
+    toast(`Deleted ${res.removed} contact${res.removed === 1 ? "" : "s"}`);
+    renderPage("contacts");
+  });
 }
 
 const pagination = (start, total, page, pages, prefix) => `
@@ -561,6 +715,100 @@ const pagination = (start, total, page, pages, prefix) => `
 
 const emptyState = (icon, title, body) =>
   `<div class="empty"><div class="empty-icon" aria-hidden="true">${icon}</div><h3>${esc(title)}</h3><p>${esc(body)}</p></div>`;
+
+// ══════════════════════════════════════════════════════════════════════════
+// CONTACT DRAWER
+// ══════════════════════════════════════════════════════════════════════════
+let drawerContact = null;
+
+/** Human description of how a value was found, from its stored source. */
+function matchedBy(c) {
+  switch (c.source) {
+    case "mailto": return "mailto: link";
+    case "tel": return "tel: link";
+    case "schema": return "schema.org data";
+    case "link": return "social pattern";
+    case "custom_regex": return c.label ? `custom pattern “${c.label}”` : "custom pattern";
+    case "text":
+    default: return `${c.type} regex`;
+  }
+}
+
+function drawerRow(key, valueHtml) {
+  return `<div class="drawer-row"><div class="drawer-k">${esc(key)}</div><div class="drawer-v">${valueHtml}</div></div>`;
+}
+
+function openDrawer(id) {
+  const c = contactsOnScreen.get(id);
+  if (!c) return;
+  drawerContact = c;
+
+  document.getElementById("drawerTitle").textContent = c.value;
+
+  const pageUrl = safeUrl(c.found_at?.url);
+  const pages = c.pageCount || 1;
+
+  document.getElementById("drawerBody").innerHTML = [
+    drawerRow("Type", typeChip(c)),
+    drawerRow("Domain", `<span class="mono">${esc(c.found_at?.domain || "—")}</span>`),
+    drawerRow("Page", `${esc(c.found_at?.pageTitle || "—")}${pageUrl
+      ? `<span class="sub"><a href="${esc(pageUrl)}" target="_blank" rel="noopener noreferrer">${esc(c.found_at.url)}</a></span>` : ""}`),
+    drawerRow("First seen", esc(fullDate(c.added_at))),
+    drawerRow("Last seen", esc(c.last_seen_at ? timeAgo(c.last_seen_at) : timeAgo(c.added_at))),
+    drawerRow("Times seen", `<span class="mono">${num(pages)}</span>
+      <span class="badge badge-dup">across ${num(pages)} page${pages === 1 ? "" : "s"}</span>`),
+    drawerRow("Exported", c.exported
+      ? `Yes, ${esc(fullDate(c.exportedAt))}`
+      : `<span style="color:var(--text-muted)">Not yet</span>`),
+    c.isDuplicate
+      ? drawerRow("Also found on", `<span class="mono">${num(c.domainSpread - 1)}</span> other domain${c.domainSpread === 2 ? "" : "s"}`)
+      : "",
+    drawerRow("Matched by", esc(matchedBy(c))),
+  ].join("");
+
+  const drawer = document.getElementById("drawer");
+  drawer.hidden = false;
+  requestAnimationFrame(() => {
+    drawer.classList.add("open");
+    document.getElementById("drawerScrim").classList.add("open");
+  });
+  document.getElementById("drawerClose").focus();
+}
+
+function closeDrawer() {
+  const drawer = document.getElementById("drawer");
+  drawer.classList.remove("open");
+  document.getElementById("drawerScrim").classList.remove("open");
+  // Keep it out of the tab order once hidden.
+  setTimeout(() => { if (!drawer.classList.contains("open")) drawer.hidden = true; }, 240);
+  drawerContact = null;
+}
+
+function setupDrawer() {
+  document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+  document.getElementById("drawerScrim").addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !document.getElementById("drawer").hidden) closeDrawer();
+  });
+
+  document.getElementById("drawerCopy").addEventListener("click", async () => {
+    if (!drawerContact) return;
+    try {
+      await navigator.clipboard.writeText(drawerContact.value);
+      toast("Copied");
+    } catch { toast("Clipboard blocked by the browser"); }
+  });
+
+  document.getElementById("drawerDiscard").addEventListener("click", async () => {
+    if (!drawerContact) return;
+    if (!confirm("Discard this contact? This cannot be undone.")) return;
+    const res = await bg({ action: "deleteContact", contactId: drawerContact.id });
+    if (!res?.ok) return toast("Delete failed");
+    closeDrawer();
+    toast("Contact discarded");
+    renderPage("contacts");
+  });
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // SCAN HISTORY
