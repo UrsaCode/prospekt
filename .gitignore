@@ -11,6 +11,7 @@ desktop.ini
 .vscode/
 
 # Packaged builds
+dist/
 *.zip
 *.crx
 *.pem
