@@ -99,6 +99,23 @@ PROSPEKT.LEGACY_DEFAULTS = {
 PROSPEKT.clone = value => JSON.parse(JSON.stringify(value));
 
 /**
+ * Whether a URL is on the skip list. Shared by the content script (which must
+ * not scan) and the background (which must tell the popup why it didn't), so
+ * the two can never disagree about what "skipped" means.
+ */
+PROSPEKT.isSkipped = (url, skipDomains) => {
+  let host = "";
+  let full = String(url || "").toLowerCase();
+  try { host = new URL(url).hostname.toLowerCase(); } catch { /* non-URL */ }
+  return (skipDomains || []).some(raw => {
+    const s = String(raw || "").toLowerCase().trim();
+    if (!s) return false;
+    if (s.includes("://") || s.endsWith(":")) return full.startsWith(s);
+    return host === s || host.endsWith("." + s);
+  });
+};
+
+/**
  * Merge stored patterns over the defaults. Missing keys fall back to defaults;
  * an explicitly emptied list stays empty (an empty array is a valid choice).
  */

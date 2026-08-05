@@ -297,17 +297,20 @@
     };
   }
 
-  function send(message) {
+  function send(message, then) {
     try {
-      chrome.runtime.sendMessage(message, () => void chrome.runtime.lastError);
+      chrome.runtime.sendMessage(message, res => { void chrome.runtime.lastError; then?.(res); });
     } catch {
       // Extension was reloaded/updated — this frame's context is dead.
+      stopWatching();
     }
   }
 
-  function scan(force) {
-    if (!compiled || compiled.settings.autoScan === false) return;
-    if (isSkipped(compiled)) return;
+  function scan(opts = {}) {
+    const { force = false, bypass = false, bypassSkip = false } = opts;
+    if (!compiled) return;
+    if (compiled.settings.autoScan === false && !bypass) return;
+    if (isSkipped(compiled) && !bypassSkip) return;
     // A same-document navigation that didn't actually change the URL (or a
     // duplicate rescan nudge) is not worth re-walking the DOM for.
     if (!force && lastScannedUrl === href()) return;
@@ -317,11 +320,50 @@
     try { payload = collect(compiled); }
     catch (err) { console.warn("[Prospekt] scan failed:", err); return; }
 
-    if (payload.totalContacts === 0) {
-      send({ action: "clearBadge" });   // don't leave the previous page's count
-      return;
-    }
-    send({ action: "storeScan", data: payload });
+    // Empty results are reported too: the background needs to distinguish
+    // "scanned, found nothing" from "never scanned" to render the popup.
+    payload.bypass = bypass || bypassSkip;
+    send({ action: "storeScan", data: payload }, res => {
+      // Keep watching only while the page is still yielding something.
+      if (res?.newContacts > 0) extendWatch();
+    });
+  }
+
+  // ── Bounded DOM watching ──────────────────────────────────────────────
+  // Lazy-loaded and infinite-scroll pages reveal contacts long after
+  // document_idle. Observing forever on every open tab is a real CPU cost, so
+  // the observer disconnects once the page stops producing anything new.
+  const WATCH_DEBOUNCE_MS = 800;
+  const WATCH_IDLE_MS = 60000;
+  let observer = null;
+  let watchDebounce = null;
+  let watchExpiry = null;
+
+  function extendWatch() {
+    if (!observer) return;
+    clearTimeout(watchExpiry);
+    watchExpiry = setTimeout(stopWatching, WATCH_IDLE_MS);
+  }
+
+  function stopWatching() {
+    if (observer) { observer.disconnect(); observer = null; }
+    clearTimeout(watchDebounce);
+    clearTimeout(watchExpiry);
+  }
+
+  function startWatching() {
+    if (observer || !document.body) return;
+    if (!compiled || compiled.settings.autoScan === false) return;
+    if (isSkipped(compiled)) return;
+
+    observer = new MutationObserver(mutations => {
+      // Only care about content being added; attribute churn is noise.
+      if (!mutations.some(m => m.addedNodes && m.addedNodes.length)) return;
+      clearTimeout(watchDebounce);
+      watchDebounce = setTimeout(() => scan({ force: true }), WATCH_DEBOUNCE_MS);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    extendWatch();
   }
 
   // Always invokes `then`, with an error if the read failed. Returning early on
@@ -343,18 +385,28 @@
     });
   }
 
-  function scheduleScan(delay, force) {
+  function scheduleScan(delay, opts) {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(() => scan(force), delay);
+    scanTimer = setTimeout(() => scan(opts), delay);
   }
 
-  loadConfig(err => { if (!err) scheduleScan(1500, true); });
+  loadConfig(err => {
+    if (err) return;
+    scheduleScan(1500, { force: true });
+    startWatching();
+  });
 
   // Live config updates: a pattern saved in the dashboard re-scans open tabs.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (!changes[STORAGE_KEYS.PATTERNS] && !changes[STORAGE_KEYS.SETTINGS]) return;
-    loadConfig(err => { if (!err) scheduleScan(200, true); });   // patterns changed — force
+    loadConfig(err => {
+      if (err) return;
+      scheduleScan(200, { force: true });   // patterns changed — force
+      // The domain may have just been skipped, or auto-scan paused.
+      if (isSkipped(compiled) || compiled.settings.autoScan === false) stopWatching();
+      else startWatching();
+    });
   });
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -369,9 +421,16 @@
     if (msg?.action === "rescan") {
       // Unforced nudges (the navigation hook) skip a same-URL repeat so a full
       // page load isn't scanned twice. msg.force means the user asked for it
-      // explicitly via the context menu, so always re-scan.
+      // explicitly, so always re-scan. bypass/bypassSkip let an explicit
+      // request run with auto-scan paused or on a skip-listed domain.
       loadConfig(err => {
-        if (!err) scheduleScan(msg.force ? 0 : 600, !!msg.force);
+        if (!err) {
+          scheduleScan(msg.force ? 0 : 600, {
+            force: !!msg.force,
+            bypass: !!msg.bypass,
+            bypassSkip: !!msg.bypassSkip,
+          });
+        }
         sendResponse({ ok: !err });
       });
       return true;   // async response

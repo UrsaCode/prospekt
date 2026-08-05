@@ -21,6 +21,74 @@ const set = obj => new Promise((resolve, reject) => {
   });
 });
 
+// ── Per-tab page state (session storage) ────────────────────────────────
+// Ephemeral by design: page-derived content never reaches disk. Survives a
+// service-worker restart, which an in-memory Map would not.
+const PAGE_PREFIX = "page_";
+const PAGE_STALE_MS = 30000;
+const PAGE_MAX_ROWS = 200;
+
+const sessionGet = key => new Promise(resolve => {
+  chrome.storage.session.get(key, d => { void chrome.runtime.lastError; resolve(d || {}); });
+});
+const sessionSet = obj => new Promise(resolve => {
+  chrome.storage.session.set(obj, () => { void chrome.runtime.lastError; resolve(); });
+});
+const sessionRemove = key => new Promise(resolve => {
+  chrome.storage.session.remove(key, () => { void chrome.runtime.lastError; resolve(); });
+});
+
+const pageKey = tabId => PAGE_PREFIX + tabId;
+
+async function readPageState(tabId) {
+  if (tabId === undefined || tabId === null) return null;
+  const d = await sessionGet(pageKey(tabId));
+  return d[pageKey(tabId)] || null;
+}
+
+/**
+ * `silent` suppresses the popup nudge. Marking a tab as scanning MUST be
+ * silent: the popup reloads on the broadcast, would read scanning:true as
+ * stale, and fire another rescan — a feedback loop whose rescan messages also
+ * cancel the pending scan timer, so the scan never actually runs.
+ * Only a finished scan is worth waking the popup for.
+ */
+async function writePageState(tabId, state, { silent = false } = {}) {
+  if (tabId === undefined || tabId === null) return;
+  await sessionSet({ [pageKey(tabId)]: state });
+  if (silent) return;
+  try {
+    chrome.runtime.sendMessage({ action: "pageStateChanged", tabId }, () => void chrome.runtime.lastError);
+  } catch { /* no receiver */ }
+}
+
+chrome.tabs.onRemoved.addListener(tabId => { sessionRemove(pageKey(tabId)); });
+
+function buildPageState(data, counts, rows, newCount) {
+  return {
+    url: data.meta.url,
+    domain: data.meta.domain,
+    path: data.meta.path || "",
+    pageTitle: data.meta.pageTitle || null,
+    siteName: data.meta.siteName || null,
+    scannedAt: Date.now(),
+    total: counts.total,
+    counts,
+    newCount,
+    savedCount: Math.max(0, counts.total - newCount),
+    rows: rows.slice(0, PAGE_MAX_ROWS),
+    truncated: rows.length > PAGE_MAX_ROWS,
+    scanning: false,
+  };
+}
+
+// Marks a tab as mid-scan so the popup can render the scanning state without
+// guessing. Preserves the previous rows so a refresh doesn't blank the list.
+async function markScanning(tabId) {
+  const prev = await readPageState(tabId);
+  await writePageState(tabId, { ...(prev || {}), scanning: true, scanStartedAt: Date.now() }, { silent: true });
+}
+
 // Every read-modify-write on storage runs through this queue. Without it two
 // tabs finishing a scan at the same time both read the old array and the second
 // write silently discards the first one's contacts.
@@ -81,7 +149,6 @@ function migratePatterns(stored, reason) {
 // ── Message router ──────────────────────────────────────────────────────
 const HANDLERS = {
   storeScan: (msg, sender) => serialize(() => storeScan(msg.data, sender?.tab)),
-  clearBadge: (msg, sender) => clearBadge(sender?.tab),
   getScans: msg => getScans(msg.filters),
   getContacts: msg => getContacts(msg.filters),
   getStats: () => getStats(),
@@ -113,7 +180,129 @@ const HANDLERS = {
     return { ok: true };
   }),
   rescanTabs: () => rescanTabs(),
+  getPageState: () => getPageState(),
+  rescanTab: msg => rescanTab(msg.tabId, { force: true, bypass: !!msg.bypass }),
+  scanOnce: msg => rescanTab(msg.tabId, { force: true, bypass: true, bypassSkip: true }),
+  skipDomain: msg => serialize(() => setDomainSkipped(msg.domain, true)),
+  unskipDomain: msg => serialize(() => setDomainSkipped(msg.domain, false)),
+  exportPage: msg => exportPage(msg.tabId).then(csv => ({ csv })),
 };
+
+// ── Popup model ─────────────────────────────────────────────────────────
+async function activeTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+async function rescanTab(tabId, opts = {}) {
+  if (tabId === undefined || tabId === null) return { ok: false, reason: "no_tab" };
+  await markScanning(tabId);
+  return new Promise(resolve => {
+    try {
+      chrome.tabs.sendMessage(tabId, { action: "rescan", ...opts }, res => {
+        const err = chrome.runtime.lastError;
+        resolve({ ok: !err && res?.ok !== false, reason: err?.message });
+      });
+    } catch (e) {
+      resolve({ ok: false, reason: String(e?.message || e) });
+    }
+  });
+}
+
+async function setDomainSkipped(domain, skipped) {
+  const clean = String(domain || "").toLowerCase().replace(/^www\./, "").trim();
+  if (!clean) return { ok: false, reason: "no_domain" };
+  const d = await get(PATTERNS);
+  const patterns = PROSPEKT.resolvePatterns(d[PATTERNS]);
+  const list = (patterns.skipDomains || []).filter(x => String(x).toLowerCase() !== clean);
+  if (skipped) list.push(clean);
+  patterns.skipDomains = list;
+  patterns._v = PROSPEKT.PATTERNS_VERSION;
+  await set({ [PATTERNS]: patterns });
+  return { ok: true, skipped, domain: clean };
+}
+
+/**
+ * The entire popup model, resolved to exactly one state so the popup itself
+ * holds no branching logic. Order matters: skipped beats everything, scanning
+ * beats cached content.
+ */
+async function getPageState() {
+  const tab = await activeTab();
+  const settings = await getSettings();
+  const version = chrome.runtime.getManifest().version;
+  const base = { autoScan: settings.autoScan !== false, version };
+
+  if (!tab || !/^https?:/i.test(tab.url || "")) {
+    return { ...base, state: "unsupported", page: { url: tab?.url || "", domain: "", pageTitle: tab?.title || null } };
+  }
+
+  const domain = (() => {
+    try { return new URL(tab.url).hostname.replace(/^www\./, ""); } catch { return ""; }
+  })();
+  const path = (() => {
+    try { return new URL(tab.url).pathname; } catch { return ""; }
+  })();
+
+  const page = { url: tab.url, domain, path, pageTitle: tab.title || null, tabId: tab.id };
+
+  const pd = await get(PATTERNS);
+  const patterns = PROSPEKT.resolvePatterns(pd[PATTERNS]);
+  if (PROSPEKT.isSkipped(tab.url, patterns.skipDomains)) {
+    return { ...base, state: "skipped", page, domainStats: await domainStats(domain) };
+  }
+
+  const cached = await readPageState(tab.id);
+  const stale = !cached
+    || cached.scanning
+    || cached.url !== tab.url
+    || (Date.now() - (cached.scannedAt || 0)) > PAGE_STALE_MS;
+
+  if (stale) {
+    // Await delivery (an ack, not the scan itself). If the content script isn't
+    // reachable — orphaned by an extension reload, or never injected — the popup
+    // would otherwise sit on "scanning" forever with no way out.
+    const delivery = await rescanTab(tab.id, { force: true });
+    const stats = await domainStats(domain);
+    if (!delivery.ok) {
+      return { ...base, state: "unreachable", page, domainStats: stats, reason: delivery.reason || null };
+    }
+    return {
+      ...base,
+      state: "scanning",
+      page,
+      cached: cached && cached.url === tab.url ? cached : null,
+      domainStats: stats,
+    };
+  }
+
+  return {
+    ...base,
+    state: cached.total > 0 ? "results" : "empty",
+    page: { ...page, pageTitle: cached.pageTitle || page.pageTitle },
+    result: cached,
+    domainStats: await domainStats(domain),
+  };
+}
+
+async function domainStats(domain) {
+  if (!domain) return { contacts: 0, scans: 0 };
+  const d = await get([SCANS, CONTACTS]);
+  const contacts = (d[CONTACTS] || []).filter(c => c.found_at?.domain === domain).length;
+  const record = (d[SCANS] || []).find(s => s.found_at?.domain === domain);
+  return { contacts, scans: record?.scan_count || 0 };
+}
+
+async function exportPage(tabId) {
+  const cached = await readPageState(tabId);
+  const rows = cached?.rows || [];
+  let csv = csvRow(["Type", "Value", "Label", "Platform", "Source", "Status", "Domain", "Page URL"]);
+  for (const r of rows) {
+    csv += csvRow([r.type, r.value, r.label, r.platform, r.source,
+      r.isNew ? "new" : "already saved", cached?.domain, cached?.url]);
+  }
+  return csv;
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const handler = HANDLERS[msg?.action];
@@ -269,7 +458,9 @@ async function storeScan(data, tab) {
   if (!data?.meta?.domain) return { ok: false, reason: "bad_payload" };
 
   const settings = await getSettings();
-  if (settings.autoScan === false) return { ok: false, reason: "disabled" };
+  // `bypass` marks a scan the user asked for explicitly (Scan this page once /
+  // Scan again), which must work even with auto-scan paused.
+  if (settings.autoScan === false && !data.bypass) return { ok: false, reason: "disabled" };
 
   const d = await get([SCANS, CONTACTS]);
   const scans = Array.isArray(d[SCANS]) ? d[SCANS] : [];
@@ -286,6 +477,16 @@ async function storeScan(data, tab) {
     customs: customs.length,
     total: data.totalContacts,
   };
+
+  // A page that yielded nothing still updates the popup's view of this tab — it
+  // just never enters the library. Without this the background cannot tell
+  // "scanned, found nothing" from "never scanned", and the empty state would be
+  // a guess rather than a fact.
+  if (data.totalContacts === 0) {
+    await writePageState(tab?.id, buildPageState(data, counts, [], 0));
+    await setBadge(tab, 0);
+    return { ok: true, empty: true, newContacts: 0 };
+  }
 
   const existingIdx = scans.findIndex(s => s?.found_at?.domain === domain);
   let scanId;
@@ -338,7 +539,14 @@ async function storeScan(data, tab) {
     return `${type}:` + String(value).toLowerCase();
   };
 
-  const known = new Set(contacts.map(c => keyFor(c.type, c.value, c.label)));
+  // Map rather than Set: already-saved rows show when they were first seen.
+  const byKey = new Map();
+  for (const c of contacts) {
+    const k = keyFor(c.type, c.value, c.label);
+    if (!byKey.has(k)) byKey.set(k, c);
+  }
+  const known = new Set(byKey.keys());
+  const pageRows = [];
   const newContacts = [];
   let seq = 0;
   const mkContact = (type, value, extra) => ({
@@ -357,11 +565,24 @@ async function storeScan(data, tab) {
     scanId,
   });
 
+  // Every hit becomes a row for the popup; only novel ones enter the library.
+  // The new/saved split is a byproduct of this pass, not a second one.
   const add = (type, item, extra) => {
     const key = keyFor(type, item.value, item.label);
-    if (known.has(key)) return;
-    known.add(key);
-    newContacts.push(mkContact(type, item.value, extra));
+    const isNew = !known.has(key);
+    if (isNew) {
+      known.add(key);
+      newContacts.push(mkContact(type, item.value, extra));
+    }
+    pageRows.push({
+      type,
+      value: item.value,
+      label: item.label || extra.label || null,
+      platform: item.platform || extra.platform || null,
+      source: item.source || extra.source || null,
+      isNew,
+      savedAt: isNew ? null : (byKey.get(key)?.added_at || null),
+    });
   };
 
   data.emails.forEach(e => add("email", e, { source: e.source, context: e.context }));
@@ -403,6 +624,7 @@ async function storeScan(data, tab) {
     });
   }
 
+  await writePageState(tab?.id, buildPageState(data, counts, pageRows, newContacts.length));
   await setBadge(tab, data.totalContacts);
   return { ok: true, isNew, newContacts: newContacts.length, scanId };
 }

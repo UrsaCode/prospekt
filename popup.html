@@ -4,94 +4,372 @@
 <meta charset="UTF-8">
 <style>
   :root {
-    color-scheme: dark light;
-    --bg: #0a0a0f;
-    --surface: #0a0a0f;
-    --line: rgba(255,255,255,.07);
-    --text: #e9ecf8;
-    --muted: #8a8aa3;
-    --accent: #10b981;
-    --purple: #a78bfa;
-    --blue: #60a5fa;
-    --pink: #f472b6;
+    --bg: #0b0b0d;
+    --surface: #17171b;
+    --surface-2: #1e1e24;
+    --border: rgba(255,255,255,.07);
+    --border-2: rgba(255,255,255,.12);
+
+    --accent: #e0a94a;
+    --accent-hi: #eebc63;
+    --accent-on: #1a1206;
+    --live: #34d399;
+
+    --email: #e0a94a;
+    --phone: #f0764b;
+    --social: #5b9bf5;
+    --custom: #a78bfa;
+
+    --text: #e9e9f0;
+    --dim: #9a9aab;
+    --muted: #6b6b7b;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #ffffff;
-      --surface: #ffffff;
-      --line: rgba(9,9,18,.10);
-      --text: #14141f;
-      --muted: #61617a;
-      --accent: #047857;
-      --purple: #6d28d9;
-      --blue: #1d4ed8;
-      --pink: #be185d;
-    }
-  }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
+
   body {
-    width: 300px;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    width: 400px;
+    max-height: 600px;
+    display: flex;
+    flex-direction: column;
     background: var(--bg);
     color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
   }
-  .hdr { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
-  .hdr .logo {
-    width: 30px; height: 30px;
-    background: linear-gradient(135deg, #10b981, #059669);
+
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.18); }
+
+  .mono { font-family: var(--mono); }
+  .hidden { display: none !important; }
+
+  /* ── Header ─────────────────────────────────────── */
+  .hdr {
+    display: flex; align-items: center; gap: 9px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo { width: 26px; height: 26px; flex-shrink: 0; }
+  .logo svg { width: 100%; height: 100%; display: block; }
+  .brand { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
+  .ver { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .hdr-spacer { flex: 1; }
+
+  .live {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 9px 4px 7px;
+    border: 1px solid var(--border-2);
+    border-radius: 20px;
+    font-size: 9.5px; font-weight: 700; letter-spacing: .09em;
+    color: var(--dim);
+    transition: border-color .15s, color .15s;
+  }
+  .live:hover { border-color: var(--accent); color: var(--text); }
+  .live .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+  .live.on { color: var(--live); }
+  .live.on .pip { background: var(--live); box-shadow: 0 0 6px var(--live); }
+  .live.off { color: var(--accent); }
+  .live.off .pip { background: var(--accent); }
+
+  .icon-btn {
+    width: 26px; height: 26px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted);
+    transition: background .12s, color .12s;
+  }
+  .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+  .icon-btn svg { width: 15px; height: 15px; }
+
+  /* ── Page context ───────────────────────────────── */
+  .ctx {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .fav {
+    width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    background: hsl(var(--h,40) 50% 45% / .18);
+    color: hsl(var(--h,40) 70% 68%);
+  }
+  .ctx-body { min-width: 0; flex: 1; }
+  .ctx-url {
+    font-family: var(--mono); font-size: 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ctx-url b { color: var(--accent); font-weight: 700; }
+  .ctx-url span { color: var(--muted); }
+  .ctx-title {
+    font-size: 11px; color: var(--dim); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* ── Count block ────────────────────────────────── */
+  .count {
+    padding: 12px 14px 0;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .count-row { display: flex; align-items: flex-start; gap: 12px; }
+  .count-n {
+    font-family: var(--mono); font-size: 34px; font-weight: 700;
+    line-height: .95; color: var(--accent); letter-spacing: -.03em;
+  }
+  .count-lbl {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .1em;
+    color: var(--muted); line-height: 1.5; padding-top: 3px;
+  }
+  .count-right { margin-left: auto; text-align: right; padding-top: 2px; }
+  .count-new { font-size: 11.5px; font-weight: 700; color: var(--accent); }
+  .count-saved { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+
+  .bar {
+    display: flex; gap: 2px; height: 5px;
+    margin: 11px 0 12px;
+    border-radius: 3px; overflow: hidden;
+    background: rgba(255,255,255,.05);
+  }
+  .bar i { display: block; height: 100%; border-radius: 2px; }
+
+  /* Indeterminate sweep for the scanning state. */
+  .bar.busy { position: relative; background: rgba(255,255,255,.05); }
+  .bar.busy::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: sweep 1.15s ease-in-out infinite;
+  }
+  @keyframes sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+  /* ── Chips ──────────────────────────────────────── */
+  .chips {
+    display: flex; gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto; flex-shrink: 0;
+    scrollbar-width: none;
+  }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--border-2);
+    border-radius: 7px;
+    font-size: 10px; font-weight: 700; letter-spacing: .07em;
+    color: var(--dim);
+    white-space: nowrap;
+    transition: border-color .12s, color .12s, background .12s;
+  }
+  .chip:hover { color: var(--text); border-color: var(--border-2); background: var(--surface-2); }
+  .chip.on { background: var(--surface-2); border-color: var(--accent); color: var(--text); }
+  .chip .pip { width: 6px; height: 6px; border-radius: 2px; }
+  .chip .n { color: var(--muted); font-family: var(--mono); }
+  .chip.on .n { color: var(--accent); }
+
+  /* ── List ───────────────────────────────────────── */
+  .list { flex: 1; overflow-y: auto; min-height: 96px; }
+  .row {
+    display: flex; gap: 9px; align-items: flex-start;
+    padding: 9px 14px;
+    border-bottom: 1px solid rgba(255,255,255,.035);
+  }
+  .row:hover { background: var(--surface); }
+  .row-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px;
+    background: var(--type, var(--muted));
+  }
+  .row-dot.saved { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+  .row-body { min-width: 0; flex: 1; }
+  .row-val {
+    font-family: var(--mono); font-size: 12px; color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .row.is-saved .row-val { color: var(--dim); }
+  .row-meta {
+    font-size: 9.5px; font-weight: 600; letter-spacing: .08em;
+    color: var(--muted); margin-top: 3px; text-transform: uppercase;
+  }
+  .row-meta .new { color: var(--accent); }
+
+  .skel .row-val, .skel .row-meta {
+    background: linear-gradient(90deg, rgba(255,255,255,.05), rgba(255,255,255,.1), rgba(255,255,255,.05));
+    background-size: 200% 100%;
+    animation: shimmer 1.3s linear infinite;
+    color: transparent !important; border-radius: 4px;
+  }
+  .skel .row-val { width: 62%; height: 12px; }
+  .skel .row-meta { width: 38%; height: 9px; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+  .dimmed { opacity: .45; }
+
+  /* ── Empty / notice states ──────────────────────── */
+  .state {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 30px 26px; gap: 4px;
+  }
+  .state-icon {
+    width: 42px; height: 42px; border-radius: 12px;
+    background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--dim); margin-bottom: 10px;
+  }
+  .state-icon svg { width: 19px; height: 19px; }
+  .state h2 { font-size: 14px; font-weight: 700; }
+  .state p { font-size: 11.5px; color: var(--dim); line-height: 1.55; max-width: 260px; }
+  .state-actions { display: flex; gap: 8px; margin-top: 14px; }
+
+  /* ── Buttons ────────────────────────────────────── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 9px 14px;
     border-radius: 8px;
-    display: flex; align-items: center; justify-content: center; color: #fff;
+    font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border-2);
+    color: var(--text);
+    background: var(--surface-2);
+    transition: background .12s, border-color .12s, color .12s;
+    white-space: nowrap;
   }
-  .hdr .logo svg { width: 16px; height: 16px; }
-  .hdr h1 { font-size: 14px; font-weight: 700; flex: 1; }
-  .hdr .v { font-size: 9px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); padding: 2px 6px; border-radius: 4px; font-weight: 700; font-family: ui-monospace, monospace; }
-
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
-  .st { background: var(--surface); padding: 12px 4px; text-align: center; }
-  .st .n { font-size: 18px; font-weight: 700; font-family: ui-monospace, SFMono-Regular, monospace; }
-  .st .l { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-  .st:nth-child(1) .n { color: var(--accent); }
-  .st:nth-child(2) .n { color: var(--purple); }
-  .st:nth-child(3) .n { color: var(--blue); }
-  .st:nth-child(4) .n { color: var(--pink); }
-
-  .body { padding: 14px 16px; }
-  .open-btn {
-    width: 100%; padding: 10px;
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: #fff; border: none; border-radius: 8px;
-    font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    box-shadow: 0 2px 12px rgba(16,185,129,.25);
-    transition: box-shadow .15s, transform .15s;
+  .btn:hover { border-color: var(--border-2); background: #262630; }
+  .btn svg { width: 13px; height: 13px; }
+  .btn-primary {
+    background: linear-gradient(140deg, var(--accent-hi), var(--accent));
+    border-color: transparent; color: var(--accent-on); font-weight: 700;
   }
-  .open-btn:hover { box-shadow: 0 4px 20px rgba(16,185,129,.35); transform: translateY(-1px); }
-  .open-btn svg { width: 14px; height: 14px; }
+  .btn-primary:hover { filter: brightness(1.07); background: linear-gradient(140deg, var(--accent-hi), var(--accent)); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn-icon { padding: 9px 11px; }
 
-  .note { text-align: center; font-size: 10px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
-  #scanState { color: var(--accent); font-weight: 600; }
-  #scanState.paused { color: #f59e0b; }
+  /* ── Actions + footer ───────────────────────────── */
+  .actions {
+    display: flex; gap: 8px;
+    padding: 11px 14px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .actions .grow { flex: 1; }
+
+  .foot {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 10.5px; color: var(--muted);
+    flex-shrink: 0;
+  }
+  .foot b { color: var(--dim); font-weight: 700; font-family: var(--mono); }
+  .foot-links { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+  .foot-links button { font-size: 10.5px; color: var(--dim); }
+  .foot-links button:hover { color: var(--text); }
+  .foot-links .go { color: var(--accent); font-weight: 700; }
+  .foot-links .go:hover { color: var(--accent-hi); }
+
+  .toast {
+    position: fixed; left: 14px; right: 14px; bottom: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 9px 13px; border-radius: 8px;
+    font-size: 11.5px; font-weight: 600; text-align: center;
+    opacity: 0; transform: translateY(6px); pointer-events: none;
+    transition: opacity .2s, transform .2s;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::after { animation: none !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
-  <div class="hdr">
-    <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg></div>
-    <h1>Prospekt</h1>
-    <span class="v" id="version">—</span>
-  </div>
-  <div class="stats">
-    <div class="st"><div class="n" id="sE">—</div><div class="l">Emails</div></div>
-    <div class="st"><div class="n" id="sP">—</div><div class="l">Phones</div></div>
-    <div class="st"><div class="n" id="sS">—</div><div class="l">Socials</div></div>
-    <div class="st"><div class="n" id="sC">—</div><div class="l">Custom</div></div>
-  </div>
-  <div class="body">
-    <button class="open-btn" id="openBtn" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-      Open Dashboard
+  <header class="hdr">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24">
+        <rect x="3" y="2.4" width="11.5" height="2.4" rx="1.2" fill="#79818A"/>
+        <rect x="3" y="6.2" width="15" height="2.4" rx="1.2" fill="#79818A"/>
+        <rect x="3" y="10" width="8.5" height="2.4" rx="1.2" fill="#79818A"/>
+        <rect x="3" y="13.8" width="13" height="2.4" rx="1.2" fill="#79818A"/>
+        <g transform="rotate(-13 13.25 19.8)">
+          <rect x="5.5" y="18" width="15.5" height="3.6" rx="1.8" fill="#D4A24C"/>
+        </g>
+      </svg>
+    </div>
+    <span class="brand">Prospekt</span>
+    <span class="ver" id="ver"></span>
+    <span class="hdr-spacer"></span>
+    <button class="live" id="liveBtn" title="Toggle auto-scan">
+      <span class="pip"></span><span id="liveLbl">—</span>
     </button>
-    <div class="note">Auto-scanning is <span id="scanState">…</span><br>Contacts are saved automatically</div>
+    <button class="icon-btn" id="gearBtn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2m-9-11h2m18 0h2m-3.3-6.7-1.4 1.4M6.7 17.3l-1.4 1.4m0-13.4 1.4 1.4m10.6 10.6 1.4 1.4"/></svg>
+    </button>
+  </header>
+
+  <section class="ctx" id="ctx">
+    <div class="fav" id="fav">?</div>
+    <div class="ctx-body">
+      <div class="ctx-url" id="ctxUrl">—</div>
+      <div class="ctx-title" id="ctxTitle"></div>
+    </div>
+  </section>
+
+  <section class="count hidden" id="countBlock">
+    <div class="count-row">
+      <div class="count-n" id="countN">0</div>
+      <div class="count-lbl">FOUND<br>ON THIS PAGE</div>
+      <div class="count-right">
+        <div class="count-new" id="countNew">—</div>
+        <div class="count-saved" id="countSaved"></div>
+      </div>
+    </div>
+    <div class="bar" id="bar"></div>
+  </section>
+
+  <nav class="chips hidden" id="chips"></nav>
+
+  <div class="list hidden" id="list"></div>
+
+  <div class="state hidden" id="state"></div>
+
+  <div class="actions hidden" id="actions">
+    <button class="btn btn-primary grow" id="copyBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span id="copyLbl">Copy</span>
+    </button>
+    <button class="btn" id="exportBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export
+    </button>
+    <button class="btn btn-icon" id="refreshBtn" title="Scan again" aria-label="Scan again">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+    </button>
   </div>
+
+  <footer class="foot">
+    <span id="footStats">—</span>
+    <span class="foot-links">
+      <button id="skipBtn">Skip domain</button>
+      <button class="go" id="dashBtn">Dashboard →</button>
+    </span>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
 <script src="popup.js"></script>
 </body>
 </html>
