@@ -379,10 +379,15 @@ async function getInsights(range = "12w") {
     { key: "good", label: "Good", sub: "26–50%", test: r => r > 25 && r <= 50 },
     { key: "high", label: "High", sub: "51%+", test: r => r > 50 },
   ];
+  // Records with no page data can't be bucketed by yield; counting them as 0%
+  // would inflate the zero bucket with domains that have simply never been
+  // re-scanned since the upgrade.
+  const rateable = scans.filter(hasPageData);
   const distribution = BUCKETS.map(b => ({
     ...b, test: undefined,
-    count: scans.filter(s => b.test(yieldRate(s))).length,
+    count: rateable.filter(s => b.test(yieldRate(s))).length,
   }));
+  const unrated = scans.length - rateable.length;
 
   return {
     range,
@@ -397,7 +402,8 @@ async function getInsights(range = "12w") {
     },
     socials: { total: socialTotal, items: socials },
     distribution,
-    domainsTotal: scans.length,
+    domainsTotal: rateable.length,
+    unratedDomains: unrated,
     zeroDomains: distribution[0].count,
   };
 }
@@ -1138,23 +1144,42 @@ function clampInt(value, min, max, fallback) {
 /** A domain that has been scanned but has never produced a single contact. */
 const isDry = s => !(s?.counts?.total > 0);
 
-const yieldRate = s => {
-  const seen = s?.pagesScanned || 0;
-  return seen ? Math.round(((s.pagesProductive || 0) / seen) * 1000) / 10 : 0;
+/**
+ * Percentage of a domain's pages that produced at least one contact, or null
+ * when it cannot be known.
+ *
+ * Records written before per-page tracking have no pagesProductive at all.
+ * Reporting those as 0% claimed a domain had never produced anything, which for
+ * a domain holding 11 contacts is plainly false — "unknown" is the honest
+ * answer until it is scanned again.
+ */
+const hasPageData = s => typeof s?.pagesProductive === "number";
+
+const yieldRate = (s, pagesScanned) => {
+  if (!hasPageData(s)) return null;
+  const seen = pagesScanned ?? s.pagesScanned ?? 0;
+  return seen ? Math.round((s.pagesProductive / seen) * 1000) / 10 : 0;
 };
 
 async function getScans(filters = {}) {
   const d = await get([SCANS, PATTERNS, SETTINGS]);
   const patterns = PROSPEKT.resolvePatterns(d[PATTERNS]);
   const settings = { ...DEFAULT_SETTINGS, ...(d[SETTINGS] || {}) };
-  let scans = (Array.isArray(d[SCANS]) ? d[SCANS] : []).map(s => ({
-    ...s,
-    dry: isDry(s),
-    skipped: PROSPEKT.isSkipped(`https://${s.found_at?.domain || ""}/`, patterns.skipDomains),
-    yieldRate: yieldRate(s),
-    pagesScanned: s.pagesScanned || s.scan_count || 0,
-    pagesProductive: s.pagesProductive || 0,
-  }));
+  let scans = (Array.isArray(d[SCANS]) ? d[SCANS] : []).map(s => {
+    // Backfill FIRST, then derive. Computing the rate from the raw record while
+    // separately backfilling pagesScanned reported a page count and a yield
+    // that disagreed with each other.
+    const pagesScanned = s.pagesScanned || s.scan_count || 0;
+    return {
+      ...s,
+      dry: isDry(s),
+      skipped: PROSPEKT.isSkipped(`https://${s.found_at?.domain || ""}/`, patterns.skipDomains),
+      pagesScanned,
+      pagesProductive: s.pagesProductive || 0,
+      yieldRate: yieldRate(s, pagesScanned),
+      yieldKnown: hasPageData(s),
+    };
+  });
 
   // Counted before the state filter so the chips stay switchable.
   const stateCounts = {
@@ -1180,7 +1205,8 @@ async function getScans(filters = {}) {
   const SORTS = {
     contacts: (a, b) => (b.counts?.total || 0) - (a.counts?.total || 0),
     pages: (a, b) => (b.pagesScanned || 0) - (a.pagesScanned || 0),
-    yield: (a, b) => b.yieldRate - a.yieldRate,
+    // Unknown yields sort last rather than as if they were 0%.
+    yield: (a, b) => (b.yieldRate ?? -1) - (a.yieldRate ?? -1),
     recent: (a, b) => String(b.last_scanned_at || b.added_at).localeCompare(String(a.last_scanned_at || a.added_at)),
     domain: (a, b) => String(a.found_at?.domain).localeCompare(String(b.found_at?.domain)),
   };

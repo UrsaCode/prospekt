@@ -879,7 +879,7 @@ function openScanDrawer(id) {
       drawerRow("Socials", `<span class="mono">${num(c.socials)}</span>`),
       drawerRow("Custom", `<span class="mono">${num(c.customs)}</span>`),
       drawerRow("Pages scanned", `<span class="mono">${num(s.pagesScanned)}</span>`),
-      drawerRow("Yield rate", `<span class="mono">${s.yieldRate}%</span> of pages`),
+      drawerRow("Yield rate", yieldText(s)),
       drawerRow("First seen", esc(fullDate(s.added_at))),
       drawerRow("Last scan", esc(timeAgo(s.last_scanned_at || s.added_at))),
       s.skipped ? drawerRow("Status", `<span class="badge badge-role">On your skip list</span>`) : "",
@@ -930,6 +930,18 @@ const SCAN_SORTS = [
 ];
 
 let scansOnScreen = new Map();
+
+/**
+ * A yield rate is only meaningful once the domain has per-page data. Records
+ * from before that tracking existed have none, and rendering the missing value
+ * straight into the template printed a literal "undefined%". Treated as unknown
+ * until the domain is scanned again — which is also the honest answer.
+ */
+const hasYield = s => typeof s?.yieldRate === "number";
+
+const yieldText = s => (hasYield(s)
+  ? `<span class="mono">${esc(s.yieldRate)}%</span> of pages`
+  : `<span class="tone-muted">Not measured yet — rescan to find out</span>`);
 
 async function renderScans() {
   const el = document.getElementById("page-scans");
@@ -1053,8 +1065,9 @@ async function renderScans() {
               <td class="num">${num(s.pagesScanned)}</td>
               <td>
                 <div class="yield">
-                  <div class="yield-track"><i style="width:${Math.max(2, s.yieldRate)}%"></i></div>
-                  <span class="yield-n ${s.yieldRate ? "" : "tone-phone"}">${s.yieldRate}%</span>
+                  <div class="yield-track"><i style="width:${hasYield(s) ? Math.max(2, s.yieldRate) : 0}%"></i></div>
+                  <span class="yield-n ${!hasYield(s) ? "tone-muted" : s.yieldRate ? "" : "tone-phone"}"
+                        title="${hasYield(s) ? "" : "No page-level data for this domain yet"}">${hasYield(s) ? esc(s.yieldRate) + "%" : "—"}</span>
                 </div>
               </td>
               <td class="cell-time">${esc(shortDate(s.added_at))}</td>
@@ -1308,7 +1321,9 @@ async function renderInsights() {
         <div class="dist">${dist}</div>
         <p class="ins-note">Most of what you browse gives up nothing — that's normal.
           ${i.zeroDomains ? `The ${num(i.zeroDomains)} domains in the zero bucket have been scanned repeatedly;
-          skipping them cuts wasted work without costing you contacts.` : ""}</p>
+          skipping them cuts wasted work without costing you contacts.` : ""}
+          ${i.unratedDomains ? `${num(i.unratedDomains)} older domains aren't shown here — they predate
+          per-page tracking and will appear once they're scanned again.` : ""}</p>
       </div>
     </section>
   `;
