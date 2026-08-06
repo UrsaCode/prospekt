@@ -24,3 +24,6 @@ dist/
 # there — a blanket *.png also swallowed icons/ and website/assets/.
 .playwright-mcp/
 /*.png
+
+# This branch carries the site, so undo any website/ rule merged from main.
+!website/
