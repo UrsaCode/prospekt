@@ -474,7 +474,12 @@ async function openAndScan(url, domain) {
   if (target.protocol !== "http:" && target.protocol !== "https:") {
     return { ok: false, error: "Only http and https pages can be opened." };
   }
-  if (clean && bareHost(target.hostname) !== clean) {
+  // The domain gate is mandatory. Guarding the comparison with `clean &&` made
+  // it fail OPEN: an absent or empty domain skipped the check entirely and any
+  // http(s) URL would be opened. A missing domain is a caller error, not
+  // permission to navigate anywhere.
+  if (!clean) return { ok: false, error: "No domain given." };
+  if (bareHost(target.hostname) !== clean) {
     return { ok: false, error: "That page isn't on this domain." };
   }
 
@@ -740,9 +745,33 @@ async function exportPage(tabId) {
   return csv;
 }
 
+// Content scripts run in every page. They legitimately need to report a scan
+// and nothing else, so that is all they may call. Everything else — opening
+// tabs, exporting the library, clearing storage, importing settings — is
+// reachable only from the extension's own pages. Without this, a single
+// injection into the isolated world would inherit the whole API surface.
+const CONTENT_SCRIPT_ACTIONS = new Set(["storeScan"]);
+
+/**
+ * Extension pages are identified by their URL origin, not by the absence of
+ * sender.tab: the dashboard is an extension page that lives in a tab, so it
+ * has sender.tab set just like a content script does.
+ */
+function isExtensionPage(sender) {
+  if (!sender || sender.id !== chrome.runtime.id) return false;
+  const base = chrome.runtime.getURL("");
+  return typeof sender.url === "string" && sender.url.startsWith(base);
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const handler = HANDLERS[msg?.action];
   if (!handler) return false;
+
+  if (!isExtensionPage(sender) && !CONTENT_SCRIPT_ACTIONS.has(msg.action)) {
+    console.warn("[Prospekt] refused", msg.action, "from", sender?.url);
+    sendResponse({ ok: false, error: "Not permitted from this context." });
+    return true;
+  }
   Promise.resolve()
     .then(() => handler(msg, sender))
     .then(result => sendResponse(result === undefined ? { ok: true } : result))
