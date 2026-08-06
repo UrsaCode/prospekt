@@ -194,6 +194,8 @@ const HANDLERS = {
   deleteContacts: msg => serialize(() => deleteContacts(msg.ids)),
   deleteScans: msg => serialize(() => deleteScans(msg.ids)),
   rescanDomain: msg => rescanDomain(msg.domain),
+  domainTabs: msg => domainTabs(msg.domain),
+  openAndScan: msg => openAndScan(msg.url, msg.domain),
   exportSelection: msg => exportSelection(msg.ids).then(csv => ({ csv })),
 };
 
@@ -438,6 +440,65 @@ async function deleteScans(ids) {
  * opening a site the user isn't looking at would be a surprising side effect of
  * a button in a history table.
  */
+const bareHost = value => String(value || "").toLowerCase().replace(/^www\./, "").trim();
+
+/** Open tabs currently on a domain, so the UI can offer the right next step. */
+async function domainTabs(domain) {
+  const clean = bareHost(domain);
+  if (!clean) return { count: 0, tabs: [] };
+  const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+  const matching = tabs.filter(t => {
+    try { return bareHost(new URL(t.url).hostname) === clean; } catch { return false; }
+  });
+  return {
+    count: matching.length,
+    tabs: matching.slice(0, 5).map(t => ({ id: t.id, title: t.title || t.url, url: t.url })),
+  };
+}
+
+/**
+ * Open a page and scan it once it has loaded.
+ *
+ * The URL must belong to the domain the caller asked about — the dashboard is
+ * only ever meant to reopen a site already in the library, and validating here
+ * means a compromised page script can't turn this into "open anything".
+ * The forced scan runs with bypass so it still works with auto-scan paused,
+ * which is the whole point of pressing Rescan.
+ */
+async function openAndScan(url, domain) {
+  const clean = bareHost(domain);
+  let target;
+  try { target = new URL(String(url)); }
+  catch { return { ok: false, error: "That isn't a valid URL." }; }
+
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    return { ok: false, error: "Only http and https pages can be opened." };
+  }
+  if (clean && bareHost(target.hostname) !== clean) {
+    return { ok: false, error: "That page isn't on this domain." };
+  }
+
+  const tab = await chrome.tabs.create({ url: target.href, active: true });
+
+  // Scan once the page finishes loading, then stop listening. Bounded by a
+  // timeout so a page that never completes doesn't leak the listener.
+  const done = (tabId, info) => {
+    if (tabId !== tab.id || info.status !== "complete") return;
+    chrome.tabs.onUpdated.removeListener(done);
+    clearTimeout(timer);
+    setTimeout(() => {
+      try {
+        chrome.tabs.sendMessage(tab.id, { action: "rescan", force: true, bypass: true },
+          () => void chrome.runtime.lastError);
+      } catch { /* tab closed */ }
+    }, 600);   // let document_idle work finish first
+  };
+  const timer = setTimeout(() => chrome.tabs.onUpdated.removeListener(done), 30000);
+  chrome.tabs.onUpdated.addListener(done);
+
+  return { ok: true, tabId: tab.id };
+}
+
 async function rescanDomain(domain) {
   const clean = String(domain || "").toLowerCase().replace(/^www\./, "");
   if (!clean) return { ok: false, reason: "no_domain" };

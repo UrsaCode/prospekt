@@ -178,6 +178,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupAutoScanToggle();
   setupDrawer();
   setupRange();
+  setupModal();
   setupSettingsIO();
   reflectAutoScan();
   if (!routeFromHash()) renderPage("overview");
@@ -890,13 +891,7 @@ function openScanDrawer(id) {
     ].join(""),
     primary: {
       label: "Rescan domain",
-      run: async () => {
-        const res = await bg({ action: "rescanDomain", domain: s.found_at?.domain });
-        if (!res?.ok) return toast("Couldn't rescan");
-        toast(res.notified
-          ? `Re-scanning ${res.notified} open tab${res.notified === 1 ? "" : "s"}`
-          : "Open that site in a tab first — Prospekt only reads pages you're viewing");
-      },
+      run: () => rescanDomainFlow(s.found_at?.domain, s.found_at?.url),
     },
     secondary: {
       label: s.skipped ? "Stop skipping" : "Skip",
@@ -928,6 +923,105 @@ const SCAN_SORTS = [
   { key: "recent", label: "Most recent" },
   { key: "domain", label: "By domain" },
 ];
+
+// ── Modal ────────────────────────────────────────────────────────────────
+let modalActions = [];
+
+function openModal({ title, bodyHtml, actions }) {
+  document.getElementById("modalTitle").textContent = title;
+  document.getElementById("modalBody").innerHTML = bodyHtml;
+
+  modalActions = actions;
+  document.getElementById("modalActions").innerHTML = actions.map((a, i) =>
+    `<button type="button" class="btn ${a.tone || "btn-ghost"}" data-act="${i}">${esc(a.label)}</button>`).join("");
+  document.querySelectorAll("#modalActions [data-act]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const act = modalActions[Number(btn.dataset.act)];
+      if (act?.run) await act.run();
+      if (act?.keepOpen !== true) closeModal();
+    });
+  });
+
+  const scrim = document.getElementById("modalScrim");
+  scrim.hidden = false;
+  requestAnimationFrame(() => scrim.classList.add("open"));
+  document.querySelector("#modalActions .btn-accent, #modalActions button")?.focus();
+}
+
+function closeModal() {
+  const scrim = document.getElementById("modalScrim");
+  scrim.classList.remove("open");
+  setTimeout(() => { if (!scrim.classList.contains("open")) scrim.hidden = true; }, 200);
+  modalActions = [];
+}
+
+function setupModal() {
+  document.getElementById("modalClose").addEventListener("click", closeModal);
+  document.getElementById("modalScrim").addEventListener("click", e => {
+    if (e.target.id === "modalScrim") closeModal();   // scrim only, not the panel
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !document.getElementById("modalScrim").hidden) closeModal();
+  });
+}
+
+/**
+ * Rescanning only works on a page that is actually open — Prospekt reads the
+ * DOM of tabs you are viewing, it does not fetch anything. Rather than telling
+ * the user that and leaving them to it, offer to open the page here.
+ */
+async function rescanDomainFlow(domain, lastUrl) {
+  if (!domain) return;
+  const info = await bg({ action: "domainTabs", domain });
+  const open = info?.count || 0;
+  const home = `https://${domain}/`;
+  const page = safeUrl(lastUrl);
+  const actions = [];
+
+  if (open) {
+    actions.push({
+      label: `Rescan ${open} open tab${open === 1 ? "" : "s"}`,
+      tone: "btn-accent",
+      run: async () => {
+        const res = await bg({ action: "rescanDomain", domain });
+        toast(res?.notified ? `Re-scanning ${res.notified} tab${res.notified === 1 ? "" : "s"}` : "Couldn't reach those tabs");
+      },
+    });
+  }
+
+  if (page && page !== home) {
+    actions.push({
+      label: open ? "Open last page" : "Open last page and scan",
+      tone: open ? "btn-ghost" : "btn-accent",
+      run: async () => {
+        const res = await bg({ action: "openAndScan", url: page, domain });
+        toast(res?.ok ? "Opened — scanning once it loads" : (res?.error || "Couldn't open that page"));
+      },
+    });
+  }
+
+  actions.push({
+    label: page && page !== home ? "Open homepage" : "Open site and scan",
+    tone: open || (page && page !== home) ? "btn-ghost" : "btn-accent",
+    run: async () => {
+      const res = await bg({ action: "openAndScan", url: home, domain });
+      toast(res?.ok ? "Opened — scanning once it loads" : (res?.error || "Couldn't open that site"));
+    },
+  });
+
+  actions.push({ label: "Cancel" });
+
+  openModal({
+    title: `Rescan ${domain}`,
+    bodyHtml: `
+      <p>Prospekt reads pages you have open — it never fetches anything on its own.</p>
+      <p class="modal-state">${open
+        ? `<b>${num(open)}</b> tab${open === 1 ? " is" : "s are"} open on this domain and can be re-scanned now.`
+        : `No tabs are open on this domain. Opening one will scan it as soon as it loads.`}</p>
+      ${page && page !== home ? `<p class="modal-url mono">${esc(page)}</p>` : ""}`,
+    actions,
+  });
+}
 
 let scansOnScreen = new Map();
 
@@ -1073,7 +1167,7 @@ async function renderScans() {
               <td class="cell-time">${esc(shortDate(s.added_at))}</td>
               <td class="cell-time">${esc(timeAgo(s.last_scanned_at || s.added_at))}</td>
               <td class="cell-actions row-tools">
-                <button type="button" class="cell-btn sh-rescan" data-domain="${esc(s.found_at?.domain)}" title="Rescan domain" aria-label="Rescan">
+                <button type="button" class="cell-btn sh-rescan" data-domain="${esc(s.found_at?.domain)}" data-id="${esc(s.id)}" title="Rescan domain" aria-label="Rescan">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
                 </button>
                 <button type="button" class="cell-btn sh-skip" data-domain="${esc(s.found_at?.domain)}" data-skipped="${s.skipped ? "1" : ""}"
@@ -1128,11 +1222,9 @@ function wireScans(el) {
   // Row tools must not also open the drawer.
   el.querySelectorAll(".row-tools").forEach(td => td.addEventListener("click", e => e.stopPropagation()));
 
-  el.querySelectorAll(".sh-rescan").forEach(b => b.addEventListener("click", async () => {
-    const res = await bg({ action: "rescanDomain", domain: b.dataset.domain });
-    toast(res?.notified
-      ? `Re-scanning ${res.notified} open tab${res.notified === 1 ? "" : "s"}`
-      : "Open that site in a tab first — Prospekt only reads pages you're viewing");
+  el.querySelectorAll(".sh-rescan").forEach(b => b.addEventListener("click", () => {
+    const rec = scansOnScreen.get(b.dataset.id);
+    rescanDomainFlow(b.dataset.domain, rec?.found_at?.url);
   }));
 
   el.querySelectorAll(".sh-skip").forEach(b => b.addEventListener("click", async () => {
