@@ -162,10 +162,15 @@ function routeFromHash(hash) {
   const key = String(hash || location.hash || "").replace(/^#/, "").trim();
   if (!key) return false;
   if (key === "export-contacts" || key === "export-scans") {
+    // Clear it, or refreshing the page would fire the export again.
+    history.replaceState(null, "", location.pathname + location.search);
     doExport(key === "export-scans" ? "scans" : "contacts");
     return false;
   }
   if (!PAGES.includes(key)) return false;
+  // Already here — re-rendering would throw away scroll position and any
+  // in-progress edits for nothing.
+  if (key === state.page) return true;
   document.querySelector(`.nav-item[data-page="${key}"]`)?.click();
   return true;
 }
@@ -272,6 +277,15 @@ async function doExport(type) {
 // ── Page Router ──────────────────────────────────────────────────────────
 async function renderPage(page) {
   state.page = page;
+
+  // Keep the URL in step so a refresh lands back on the same page. Sidebar
+  // navigation used to leave the hash empty, so reloading anywhere always
+  // dropped you on Overview. replaceState rather than assigning location.hash:
+  // it fires no hashchange, so there is no re-entrant render to guard against,
+  // and it doesn't stack a history entry for every click.
+  if (PAGES.includes(page) && location.hash !== "#" + page) {
+    history.replaceState(null, "", location.pathname + location.search + "#" + page);
+  }
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.getElementById(`page-${page}`).classList.add("active");
 

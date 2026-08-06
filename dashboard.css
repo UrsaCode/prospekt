@@ -56,6 +56,12 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* The UA rule for [hidden] is display:none, but ANY author `display` beats it —
+   so .modal-scrim{display:flex} left a transparent, full-viewport, fixed
+   overlay laid out over the page, swallowing every click and scroll while
+   looking perfectly normal. Make the attribute authoritative. */
+[hidden] { display: none !important; }
+
 body {
   font-family: var(--sans);
   background: var(--bg-root);

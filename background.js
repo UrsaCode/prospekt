@@ -745,11 +745,19 @@ async function exportPage(tabId) {
   return csv;
 }
 
-// Content scripts run in every page. They legitimately need to report a scan
-// and nothing else, so that is all they may call. Everything else — opening
-// tabs, exporting the library, clearing storage, importing settings — is
-// reachable only from the extension's own pages. Without this, a single
-// injection into the isolated world would inherit the whole API surface.
+// Content scripts run in every page and only ever need to report a scan, so
+// that is all they may call through this router.
+//
+// Scope, stated honestly: this closes the actions that only the worker can
+// perform — opening tabs (openAndScan, openDashboard), driving other tabs, and
+// the settings import path. It does NOT put the library out of reach of a
+// compromised content script: chrome.storage.local is shared with content
+// scripts by design (content.js reads patterns and settings from it directly),
+// so anything stored there can still be read or overwritten without going
+// through a message at all. Putting contacts beyond that reach would mean
+// moving them to extension-origin IndexedDB, which is a larger change than this
+// threat currently justifies — page JS cannot reach the isolated world without
+// a Chrome bug, and nothing here evaluates page-supplied code.
 const CONTENT_SCRIPT_ACTIONS = new Set(["storeScan"]);
 
 /**
@@ -764,8 +772,13 @@ function isExtensionPage(sender) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  const handler = HANDLERS[msg?.action];
-  if (!handler) return false;
+  // Own-property lookup: HANDLERS["constructor"] would otherwise resolve up the
+  // prototype chain to Object — truthy and callable — and HANDLERS["__proto__"]
+  // to Object.prototype. Neither escalates anything, but both make the
+  // permission check below fire on something that is not a handler.
+  const action = msg?.action;
+  if (typeof action !== "string" || !Object.hasOwn(HANDLERS, action)) return false;
+  const handler = HANDLERS[action];
 
   if (!isExtensionPage(sender) && !CONTENT_SCRIPT_ACTIONS.has(msg.action)) {
     console.warn("[Prospekt] refused", msg.action, "from", sender?.url);
