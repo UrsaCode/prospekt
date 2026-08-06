@@ -37,8 +37,18 @@ function dashboardHtml() {
 
   // The stub must run before defaults.js; background.js supplies the real
   // message handlers the dashboard talks to.
+  const anchor = /<script\s+src="defaults\.js"\s*><\/script>/;
+  if (!anchor.test(html)) {
+    // String.replace no-ops silently. Without this check, changing the script
+    // tag in dashboard.html would serve a page with no chrome.* shim, and the
+    // only symptom would be an opaque "chrome is undefined" in the console.
+    throw new Error(
+      'preview: could not find <script src="defaults.js"></script> in dashboard.html.\n'
+      + "The stub injection anchors on that tag — update tools/preview.js to match."
+    );
+  }
   html = html.replace(
-    '<script src="defaults.js"></script>',
+    anchor,
     `<script>window.__PROSPEKT_VERSION = ${JSON.stringify(version)};</script>\n`
     + '  <script src="tools/preview-stub.js"></script>\n'
     + '  <script src="defaults.js"></script>\n'
@@ -51,26 +61,55 @@ function dashboardHtml() {
   return html;
 }
 
-http.createServer((req, res) => {
-  const clean = decodeURIComponent(req.url.split("?")[0].split("#")[0]);
-  const rel = clean === "/" ? "/dashboard.html" : clean;
+/**
+ * Resolve a request path to a file inside the repo, or null.
+ *
+ * startsWith(ROOT) is NOT sufficient: it is a string test, not a path test, so
+ * a sibling directory whose name merely begins with the repo name — e.g.
+ * ".../prospekt-notes" next to ".../prospekt" — satisfies it and escapes the
+ * repo entirely.
+ */
+function resolveInsideRoot(rel) {
+  const file = path.resolve(ROOT, "." + path.sep + rel);
+  const relative = path.relative(ROOT, file);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+  return file;
+}
 
-  if (rel === "/dashboard.html") {
-    res.writeHead(200, { "Content-Type": TYPES[".html"], "Cache-Control": "no-store" });
-    return res.end(dashboardHtml());
+const server = http.createServer((req, res) => {
+  let rel;
+  try {
+    // Throws URIError on a malformed escape such as /%zz. Uncaught, that ends
+    // the process — one stray probe would kill the dev session mid-edit.
+    rel = decodeURIComponent(req.url.split("?")[0].split("#")[0]);
+  } catch {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    return res.end("bad request path");
   }
 
-  // Confine to the repo — this is a dev server, but path traversal is still
-  // not something to leave lying around.
-  const file = path.join(ROOT, rel);
-  if (!file.startsWith(ROOT)) {
-    res.writeHead(403);
+  if (rel === "/") rel = "/dashboard.html";
+
+  if (rel === "/dashboard.html") {
+    let html;
+    try { html = dashboardHtml(); }
+    catch (err) {
+      console.error("\n" + err.message + "\n");
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      return res.end(err.message);
+    }
+    res.writeHead(200, { "Content-Type": TYPES[".html"], "Cache-Control": "no-store" });
+    return res.end(html);
+  }
+
+  const file = resolveInsideRoot(rel);
+  if (!file) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
     return res.end("forbidden");
   }
 
   fs.readFile(file, (err, data) => {
     if (err) {
-      res.writeHead(404);
+      res.writeHead(404, { "Content-Type": "text/plain" });
       return res.end("not found");
     }
     res.writeHead(200, {
@@ -79,10 +118,22 @@ http.createServer((req, res) => {
     });
     res.end(data);
   });
-}).listen(PORT, () => {
+});
+
+server.on("error", err => {
+  console.error(err.code === "EADDRINUSE"
+    ? `\npreview: port ${PORT} is already in use. Set PORT to something else:\n  PORT=8771 npm run preview\n`
+    : `\npreview: ${err.message}\n`);
+  process.exit(1);
+});
+
+// Bind the loopback interface explicitly. listen(PORT) alone binds 0.0.0.0 —
+// every interface — which would put a file server for this repo on whatever
+// network the machine is attached to, while the banner below claims localhost.
+server.listen(PORT, "127.0.0.1", () => {
   console.log(`
 Prospekt dashboard preview
-  http://127.0.0.1:${PORT}
+  http://127.0.0.1:${PORT}    (loopback only)
 
 Serving the real files from the repo with a stubbed chrome.* and a sample
 library. Storage is in-memory: reloading resets it.
