@@ -1096,6 +1096,12 @@ function urlHash(url) {
 function foldPage(record, meta, contactCount, now) {
   const hash = urlHash(meta.url);
   if (!Array.isArray(record.pageHashes)) record.pageHashes = [];
+  // Normalise both counters up front. pagesProductive used to be assigned only
+  // when a page produced something, so folding a pre-existing record with a
+  // barren scan left it undefined — page data existed, but the record looked
+  // untracked and reported its yield as unknown instead of a true 0%.
+  if (typeof record.pagesScanned !== "number") record.pagesScanned = 0;
+  if (typeof record.pagesProductive !== "number") record.pagesProductive = 0;
   const firstVisit = !record.pageHashes.includes(hash);
 
   if (firstVisit) {
@@ -1153,12 +1159,17 @@ const isDry = s => !(s?.counts?.total > 0);
  * a domain holding 11 contacts is plainly false — "unknown" is the honest
  * answer until it is scanned again.
  */
-const hasPageData = s => typeof s?.pagesProductive === "number";
+// A pageHashes array is proof the record has been through per-page tracking,
+// even if pagesProductive was never assigned because nothing produced. Checking
+// only pagesProductive mislabelled those as untracked.
+const hasPageData = s =>
+  typeof s?.pagesProductive === "number" || Array.isArray(s?.pageHashes);
 
 const yieldRate = (s, pagesScanned) => {
   if (!hasPageData(s)) return null;
   const seen = pagesScanned ?? s.pagesScanned ?? 0;
-  return seen ? Math.round((s.pagesProductive / seen) * 1000) / 10 : 0;
+  const produced = s.pagesProductive || 0;
+  return seen ? Math.round((produced / seen) * 1000) / 10 : 0;
 };
 
 async function getScans(filters = {}) {
