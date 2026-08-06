@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No dependencies by design, so there is nothing to install or cache.
+      - name: Test
+        run: npm test
+
+      # build.js validates the manifest, that every referenced file exists, that
+      # all JS parses, that importScripts resolves, and that no HTML or CSS
+      # pulls a remote resource. A packaging mistake fails here, not in Chrome.
+      - name: Build
+        run: npm run build
+
+      - name: Upload extension
+        if: matrix.node == '20'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prospekt-unpacked
+          path: dist/prospekt
+          if-no-files-found: error

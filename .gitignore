@@ -2,6 +2,10 @@
 .remember/
 .claude/
 
+# Node
+node_modules/
+npm-debug.log*
+
 # OS / editor cruft
 Thumbs.db
 desktop.ini
@@ -16,7 +20,7 @@ dist/
 *.crx
 *.pem
 
-# Test tooling artifacts
+# Test tooling artifacts. Screenshots land in the repo root, so scope the rule
+# there — a blanket *.png also swallowed icons/ and website/assets/.
 .playwright-mcp/
-*.png
-!icons/*.png
+/*.png

@@ -1,133 +1,130 @@
 # Prospekt
 
-**Free contact intelligence — auto-extracts emails, phones, and social profiles from every page you visit.**
+**Contact intelligence that never leaves your browser.** Prospekt reads the pages
+you visit and keeps the emails, phone numbers, social profiles and anything else
+you write a pattern for — on your own machine, with no account, no server and no
+network calls.
 
-A full-featured, privacy-first alternative to Hunter.io ($49+/mo), Snov.io ($39+/mo), and similar paid prospecting tools. No account, no server, no limits.
+A local alternative to Hunter.io, Snov.io and similar prospecting tools.
+
+[**ursacode.com/prospekt**](https://ursacode.com/prospekt) — overview and Chrome
+Web Store link · built and maintained by [UrsaCode](https://ursacode.com)
+
+MIT licensed · Manifest V3 · Chrome 111+ · no dependencies, no build step
 
 ---
 
-## How It Works
+## What it does
 
-1. **Install the extension** — that's it
-2. **Browse normally** — Prospekt auto-scans every page in the background, including
-   in-app route changes on single-page apps like LinkedIn, X and GitHub
-3. **Contacts are saved automatically** with full metadata: when they were found, which URL, which domain, page title
-4. **Open the Dashboard** — a full-page SPA with 5 sections, tables, charts, search, filters, and CSV export
+Browse normally. Prospekt scans each page as it loads, keeps what matches your
+patterns, and gets out of the way. Everything it finds is yours to search,
+filter and export.
 
-Only domains where at least one contact was found are recorded — visiting a page with
-nothing to extract leaves no trace in your library.
+**Popup** — what's on the page you're looking at right now: what's new, what you
+already had, and where each value came from. Copy the new ones, export the page,
+or skip the domain.
 
-## Dashboard Pages
+**Dashboard** — five pages over the whole library:
 
-| Page | What it does |
-|------|-------------|
-| **Overview** | Stat cards, recent contacts table, 7-day scan activity chart |
-| **Contacts** | Paginated table with type filters (All/Emails/Phones/Socials/Customs), global search, copy, open, delete per contact |
-| **Scan History** | Every domain where contacts were found, with timestamps, per-type counts, delete per domain |
-| **Insights** | Analytics — top domains, contact type breakdown, social platform split, custom pattern matches |
-| **Settings** | Auto-scan toggle, storage limits, the full pattern editor, exports, reset & clear |
+| Page | What it's for |
+|---|---|
+| Overview | Totals, hit rate, richest domains, latest finds, and what needs attention |
+| Contacts | Every finding, filterable by type, export state, role addresses and duplicates |
+| Scan history | Every domain seen, with yield rate and the pages that actually produced |
+| Insights | Weekly intake, and whether each of your patterns is earning its place |
+| Settings | Every regex and filter list, with a live tester |
 
-## Toolbar Icon
+### The pattern tester
 
-**Left-click** opens the popup (live counts + Open Dashboard).
-**Right-click** opens a menu:
-
-| Item | What it does |
-|------|-------------|
-| Open dashboard | Focuses the existing dashboard tab if one is open |
-| Scan this page now | Forces a re-scan of the current tab, even if it was already scanned |
-| Auto-scan ☑ | Pause or resume scanning; stays in sync with the Settings toggle |
-| Settings… | Deep-links straight to the Settings page |
-| Export contacts (CSV) | Downloads the full contact library |
-
-Chrome's own **Options** entry (same menu) also opens the dashboard.
-
-## Pattern Editor
-
-Everything the extraction engine uses is editable in **Settings**, and saving re-scans
-every open tab immediately:
-
-- **Email / phone regex** — with a Test button that validates before you save
-- **Social platform patterns** — platform ID, label, regex and regex flags per row
-- **Custom patterns** — your own regexes for crypto wallets, SKUs, ticket IDs, anything.
-  Flags default to `g` (case-sensitive); add `i` to ignore case. Matches are stored as
-  `custom` contacts and carry their label through search, insights and CSV export.
-- **Filter lists** — skip domains, junk email domains, junk email prefixes, junk social
-  path segments
-
-Invalid or half-filled rows block the save and point you at the offending field rather
-than being dropped silently.
-
-## Data Model
-
-Every contact is stored with:
-- `type` — email, phone, social, or custom
-- `value` — the actual contact
-- `platform` — for socials: linkedin, twitter, github, …
-- `label` — for customs: the pattern that matched it
-- `source` — how it was found (mailto link, tel link, body text, schema data, custom regex)
-- `added_at` — ISO datetime when it was extracted
-- `found_at` — `url`, `domain`, `pageTitle`, `siteName`, `favicon`
-- `scanId` — links back to the scan record
-
-Every scan is stored with:
-- `id`, `added_at`, `last_scanned_at`, `scan_count`
-- `found_at` — full URL, domain, path, page title, site name, favicon
-- `counts` — emails, phones, socials, customs, total
-
-## Installation
+Settings → any pattern → **Test**. It highlights matches in editable sample text
+as you type, and shows what extraction will actually **keep** — not just what the
+regex matched. The phone validator runs there too, so date-shaped false positives
+are struck out and counted separately:
 
 ```
+4 matches · 2 kept, 2 discarded by validation
+```
+
+A tester that overstates is worse than none, so it tells you the truth before you
+save a pattern rather than after it has polluted the library.
+
+## Install
+
+```bash
+git clone https://github.com/UrsaCode/prospekt.git
+cd prospekt
 node build.js
 ```
 
-Then:
+Then in Chrome:
 
 1. Open `chrome://extensions`
-2. Enable **Developer mode** (top right)
-3. Click **Load unpacked** → select `dist/prospekt`
-4. Click the Prospekt icon → "Open Dashboard"
+2. Enable **Developer mode**
+3. **Load unpacked** → select `dist/prospekt`
 
-Requires Chrome 111+. Chrome cannot install the generated `.zip` directly —
-that file is for sharing; unzip it and load the folder.
-
-`build.js` validates the extension before packaging: manifest shape, that every
-referenced file exists, that all JS parses, that `importScripts` resolves, and
-that no HTML/CSS pulls a remote resource.
-
-## File Structure
-
-```
-prospekt/
-├── manifest.json      # Manifest V3
-├── defaults.js        # Shared default patterns (content script + worker + dashboard)
-├── background.js      # Storage, scan orchestration, export
-├── content.js         # Extraction engine (auto-runs, reloads config live)
-├── popup.html/.js     # Mini popup (stats + Open Dashboard)
-├── dashboard.html     # Full-page dashboard SPA
-├── dashboard.css      # Dashboard styles (auto light/dark)
-├── dashboard.js       # Dashboard logic (5 pages, tables, charts, pattern editor)
-├── icons/             # Extension icons
-├── build.js           # Validate + stage + zip into dist/
-└── README.md
-```
+Chrome cannot install the generated `.zip` directly — unzip it and load the
+folder. After reloading the extension, refresh any tabs that were already open;
+Prospekt can't read a page whose content script predates the reload.
 
 ## Privacy
 
-- **Zero network calls** — no webfonts, no favicon services, no analytics, no telemetry
-- **No account needed** — no signup, no API keys
-- Data stored only in `chrome.storage.local`
-- Remote favicons are **off by default**; domains render as generated monograms so
-  opening your library doesn't announce it to every site in it. You can opt in under
-  Settings → Scanning.
-- Minimal permissions: `storage`, `tabs`, and host access to read page content
+This is the whole point, so it is worth being precise.
 
-## Storage Limits
+- **No network calls at all.** No webfonts, no favicon services, no analytics, no
+  telemetry, no update pings. The build refuses to package if any HTML or CSS
+  references a remote resource.
+- **No account, no server.** Nothing is uploaded, because there is nowhere to
+  upload it to.
+- **Data lives in `chrome.storage.local`**, in your browser profile, and is
+  deleted with the extension.
+- **Remote favicons are off by default.** Fetching them would tell every site in
+  your library that you were looking at it. Domains render as generated
+  monograms instead. You can opt in under Settings → Scanning.
+- **Permissions:** `storage`, `tabs`, `contextMenus`, and host access to read
+  page content. No `downloads`, no `webRequest`, no `<all_urls>` fetching.
 
-`chrome.storage.local` is finite, so both tables are capped (Settings → Scanning):
-**max stored domains** (default 5,000) and **max stored contacts** (default 20,000).
-Oldest records are dropped first.
+### Where it is honest about its limits
+
+`chrome.storage.local` is readable by content scripts by design — that is how the
+content script gets its patterns. A compromised content script could therefore
+read the library directly, without going through the extension's message router
+(which is otherwise locked down; see `background.js`). Putting contacts beyond
+that reach would mean moving them to extension-origin IndexedDB. That is a real
+option, not a thing already done.
+
+## Development
+
+No dependencies and no build tooling — plain files that Chrome loads directly.
+
+```bash
+npm test          # 317 assertions across two suites
+npm run preview   # dashboard in a normal browser tab, with sample data
+npm run build     # validate + stage into dist/ + zip
+npm run icons     # regenerate PNG icons from tools/icon.svg
+```
+
+`npm run build` validates before packaging: manifest shape, that every
+referenced file exists, that all JS parses, that `importScripts` resolves, and
+that nothing pulls a remote resource.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how the tests work and — more
+usefully — what they cannot tell you.
+
+## Layout
+
+```
+manifest.json        Manifest V3
+defaults.js          Shared defaults: patterns, filter lists, validation
+                     (loaded by all three contexts so they cannot drift)
+background.js        Service worker: storage, scan orchestration, exports
+content.js           Extraction engine, runs on every page
+popup.html/.js       Per-page results
+dashboard.*          The five-page SPA
+build.js             Validate, stage, zip
+tests/               Test suites (npm test)
+tools/               Icon generation and the dashboard preview server
+```
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
