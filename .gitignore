@@ -2,6 +2,10 @@
 .remember/
 .claude/
 
+# The landing page lives on the 'website' branch, not main - it changes on a
+# different cadence to the extension.
+website/
+
 # Node
 node_modules/
 npm-debug.log*
