@@ -16,6 +16,26 @@ const ok = (name, cond, extra = "") => {
 };
 const section = t => console.log("\n== " + t + " ==");
 
+/**
+ * Poll until `predicate` holds. Several behaviours here are driven by
+ * fire-and-forget async work (a rescan dispatch, a session-storage eviction, an
+ * export stamp), and a fixed sleep long enough for a laptop is not necessarily
+ * long enough for a loaded CI runner. Resolves as soon as the condition is
+ * true, so this is also faster than the sleeps it replaces.
+ */
+async function waitFor(predicate, label, timeout = 3000) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (predicate()) return true;
+    await new Promise(r => setTimeout(r, 5));
+  }
+  console.log(`  (waitFor timed out after ${timeout}ms: ${label})`);
+  return false;
+}
+
+/** Let pending microtasks and storage callbacks drain, for asserting absence. */
+const settle = () => new Promise(r => setTimeout(r, 50));
+
 // ─────────────────────────────────────────────────────────────
 // 1. defaults.js — regex behaviour
 // ─────────────────────────────────────────────────────────────
@@ -152,7 +172,16 @@ function makeBackground({ tabs: openTabs = [] } = {}) {
   };
 
   const ctx = vm.createContext({
-    console, URL, setTimeout, clearTimeout, Promise, chrome: chromeStub,
+    console, URL, Promise, chrome: chromeStub, clearTimeout,
+    // Product code schedules long cleanup timers (openAndScan removes its
+    // tabs.onUpdated listener after 30s). Correct in a service worker, but they
+    // would hold this process open long after the assertions finish, so let the
+    // event loop exit without them. Short timers behave normally.
+    setTimeout: (fn, ms, ...rest) => {
+      const t = setTimeout(fn, ms, ...rest);
+      if (ms >= 5000 && typeof t?.unref === "function") t.unref();
+      return t;
+    },
     importScripts: f => vm.runInContext(read(f), ctx),
   });
   vm.runInContext(read("background.js"), ctx);
@@ -270,7 +299,9 @@ const scanPayload = (domain, extra = {}) => ({
     // No cache yet -> scanning, and it must kick off a scan.
     const first = await c.getPageState();
     ok("first visit reports scanning", first.state === "scanning", first.state);
-    await new Promise(r => setTimeout(r, 30));   // the rescan is fire-and-forget
+    // The rescan is fire-and-forget; wait for it rather than guessing a delay.
+    await waitFor(() => (L.sentToTabs || []).some(m => m.msg.action === "rescan"),
+                  "rescan dispatched");
     ok("scanning triggers a rescan of that tab",
        (L.sentToTabs || []).some(m => m.id === TAB.id && m.msg.action === "rescan"),
        JSON.stringify(L.sentToTabs));
@@ -312,7 +343,7 @@ const scanPayload = (domain, extra = {}) => ({
     // Tab close evicts the cache.
     ok("page state is cached under the tab id", !!sess["page_" + TAB.id]);
     L.tabRemoved.forEach(fn => fn(TAB.id));
-    await new Promise(r => setTimeout(r, 20));
+    await waitFor(() => !sess["page_" + TAB.id], "cached page evicted");
     ok("closing the tab evicts its cached page", !sess["page_" + TAB.id], JSON.stringify(Object.keys(sess)));
   }
 
@@ -323,7 +354,11 @@ const scanPayload = (domain, extra = {}) => ({
   {
     const { ctx: c, listeners: L } = makeBackground({ tabs: [TAB] });
     await c.getPageState();
-    await new Promise(r => setTimeout(r, 40));
+    // Wait for the work to actually happen before asserting it stayed silent —
+    // otherwise this passes simply by checking too early.
+    await waitFor(() => (L.sentToTabs || []).some(m => m.msg.action === "rescan"),
+                  "rescan dispatched");
+    await settle();
     const broadcasts = (L.broadcast || []).filter(m => m.action === "pageStateChanged");
     ok("entering the scanning state broadcasts nothing", broadcasts.length === 0,
        `${broadcasts.length} broadcast(s)`);
@@ -333,7 +368,8 @@ const scanPayload = (domain, extra = {}) => ({
 
     // A finished scan is the only thing worth waking the popup for.
     await c.storeScan(scanPayload("acme.com"), TAB);
-    await new Promise(r => setTimeout(r, 40));
+    await waitFor(() => (L.broadcast || []).some(m => m.action === "pageStateChanged"),
+                  "completed scan broadcast");
     ok("a completed scan does broadcast",
        (L.broadcast || []).filter(m => m.action === "pageStateChanged").length === 1,
        JSON.stringify((L.broadcast || []).map(m => m.action)));
@@ -730,7 +766,8 @@ const scanPayload = (domain, extra = {}) => ({
        ov.needsALook.neverExported === 4, String(ov.needsALook.neverExported));
 
     await c.exportCSV("contacts");
-    await new Promise(r => setTimeout(r, 40));
+    // The stamp is written on the serialized queue, after the CSV is returned.
+    await waitFor(() => !!st.prospekt_settings?.lastExportAt?.contacts, "export stamped");
     ok("export stamps a timestamp", !!st.prospekt_settings.lastExportAt?.contacts,
        JSON.stringify(st.prospekt_settings.lastExportAt));
 
@@ -933,13 +970,13 @@ const scanPayload = (domain, extra = {}) => ({
 
   // Clicking the checkbox must persist the new value.
   lMenu.menuClick({ menuItemId: "prospekt_pause", checked: false }, { id: 1 });
-  await new Promise(r => setTimeout(r, 30));
+  await waitFor(() => storeMenu.prospekt_settings?.autoScan === false, "auto-scan persisted off");
   ok("toggling auto-scan from the menu persists",
      storeMenu.prospekt_settings.autoScan === false, JSON.stringify(storeMenu.prospekt_settings));
 
   // ...and a change made elsewhere must sync the checkbox back.
   lMenu.menuClick({ menuItemId: "prospekt_pause", checked: true }, { id: 1 });
-  await new Promise(r => setTimeout(r, 30));
+  await waitFor(() => storeMenu.prospekt_settings?.autoScan === true, "auto-scan persisted on");
   ok("re-enabling from the menu persists", storeMenu.prospekt_settings.autoScan === true);
 
   // Manifest must actually declare what the menu needs.
