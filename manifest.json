@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Prospekt",
   "version": "1.3.0",
-  "description": "Free contact intelligence. Auto-extracts emails, phones, and social profiles from every page you visit. Full dashboard with library, history, and export.",
+  "description": "Pulls emails, phones and social profiles off every page you visit. Saved on your device, exported as CSV. No account.",
   "minimum_chrome_version": "111",
   "permissions": [
     "storage",
