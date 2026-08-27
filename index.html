@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8">
+
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prospekt — contact extraction for any website | UrsaCode</title>
+<meta name="description" content="Prospekt reads the pages you visit and keeps the emails, phone numbers and social profiles it finds. Everything stays on your device. Free and open source, by UrsaCode.">
+<link rel="canonical" href="https://ursacode.com/prospekt/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Prospekt — contact extraction for any website">
+<meta property="og:description" content="Emails, phones and social profiles pulled off every page you visit. Stored on your device, exported as CSV. Free and open source.">
+<meta property="og:url" content="https://ursacode.com/prospekt/">
+<meta property="og:image" content="https://ursacode.com/prospekt/assets/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icon-128.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#111417; --panel:#171B1F; --panel2:#1D2227; --raise:#22282E;
+  --rule:#262C32; --rule-soft:#1F252A;
+  --ink:#E9E4DA; --dim:#9AA1A7; --mute:#6B737A; --faint:#4A5157;
+  --brass:#D4A24C; --brass-deep:#8A6C33; --brass-tint:#1E1A11;
+  --copper:#C97B5A; --azurite:#5B8AC4; --amethyst:#9C7BC4; --verdigris:#4FA894;
+  --wrap:1080px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font-family:'Space Grotesk',system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;line-height:1.6}
+::selection{background:rgba(212,162,76,.28)}
+a{color:var(--brass);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:var(--wrap);margin:0 auto;padding:0 24px}
+
+/* header */
+header{position:sticky;top:0;z-index:20;background:rgba(17,20,23,.9);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--rule)}
+header .wrap{display:flex;align-items:center;gap:14px;height:64px}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink)}
+.brand svg{width:30px;height:30px;flex:none}
+.brand b{font:700 17px/1 'Space Grotesk';letter-spacing:-.015em}
+nav{margin-left:auto;display:flex;align-items:center;gap:6px}
+nav a{padding:8px 12px;border-radius:7px;font:500 13px/1 'Space Grotesk';color:var(--dim);text-decoration:none}
+nav a:hover{background:var(--panel2);color:var(--ink);text-decoration:none}
+.cta{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px;border-radius:8px;
+  background:linear-gradient(180deg,#DBAA55,#C08F38);border:1px solid var(--brass-deep);
+  color:#17110A!important;font:600 13px/1 'Space Grotesk';text-decoration:none!important;transition:.15s}
+.cta:hover{background:linear-gradient(180deg,#E5B762,#CB9A3F)}
+.cta svg{width:15px;height:15px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.cta.ghost{background:var(--panel2);border-color:var(--rule);color:var(--dim)!important}
+.cta.ghost:hover{background:var(--raise);color:var(--ink)!important}
+@media(max-width:720px){nav a:not(.cta){display:none}}
+
+/* hero */
+.hero{padding:86px 0 64px;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;left:-15%;top:-70%;width:900px;height:900px;border-radius:50%;
+  background:radial-gradient(circle,rgba(212,162,76,.09),transparent 62%);pointer-events:none}
+.hero .wrap{position:relative}
+.eyebrow{display:inline-flex;align-items:center;gap:9px;padding:6px 12px;border-radius:20px;
+  border:1px solid var(--rule);background:var(--panel);margin-bottom:26px;
+  font:500 10.5px/1 'IBM Plex Mono';letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+.eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--verdigris)}
+h1{font:700 clamp(34px,5.4vw,58px)/1.08 'Space Grotesk';letter-spacing:-.025em;max-width:15ch}
+.lede{font-size:clamp(16px,2vw,19px);color:var(--dim);max-width:60ch;margin-top:22px}
+.actions{display:flex;flex-wrap:wrap;gap:11px;margin-top:34px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:30px}
+.chip{padding:7px 13px;border-radius:20px;border:1px solid var(--rule);
+  font:400 11.5px/1 'IBM Plex Mono';color:var(--mute)}
+
+.shot{margin-top:56px;border-radius:14px;overflow:hidden;border:1px solid var(--rule);
+  box-shadow:0 30px 80px -24px rgba(0,0,0,.8);background:var(--panel)}
+.shot img{display:block;width:100%;height:auto}
+
+/* sections */
+section{padding:72px 0;border-top:1px solid var(--rule)}
+h2{font:700 clamp(24px,3.2vw,34px)/1.18 'Space Grotesk';letter-spacing:-.02em;max-width:20ch}
+.sub{color:var(--dim);margin-top:14px;max-width:62ch}
+.kicker{font:500 10.5px/1 'IBM Plex Mono';letter-spacing:.17em;text-transform:uppercase;
+  color:var(--brass);margin-bottom:16px}
+
+.grid{display:grid;gap:16px;margin-top:40px}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:860px){.g3,.g2{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:24px}
+.card h3{font:600 16px/1.35 'Space Grotesk';margin-bottom:10px}
+.card p{font-size:14px;color:var(--mute)}
+.card .ic{width:34px;height:34px;border-radius:9px;background:var(--brass-tint);
+  border:1px solid var(--brass-deep);display:grid;place-items:center;margin-bottom:16px}
+.card .ic svg{width:16px;height:16px;stroke:var(--brass);stroke-width:1.8;fill:none;
+  stroke-linecap:round;stroke-linejoin:round}
+
+/* strata */
+.strata{display:flex;gap:3px;height:10px;margin:34px 0 0;max-width:520px}
+.strata b{display:block;border-radius:3px}
+
+/* code */
+code,.mono{font-family:'IBM Plex Mono',monospace}
+pre{background:var(--panel2);border:1px solid var(--rule);border-radius:10px;padding:18px 20px;
+  overflow-x:auto;font:400 12.5px/1.75 'IBM Plex Mono';color:var(--dim);margin-top:24px}
+pre .b{color:var(--brass)}
+
+/* faq */
+details{background:var(--panel);border:1px solid var(--rule);border-radius:11px;margin-bottom:10px;overflow:hidden}
+details summary{padding:17px 20px;cursor:pointer;font:600 14.5px/1.4 'Space Grotesk';list-style:none;
+  display:flex;align-items:center;gap:12px;transition:.15s}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"+";margin-left:auto;color:var(--brass);font:400 19px/1 'IBM Plex Mono';flex:none}
+details[open] summary::after{content:"−"}
+details summary:hover{background:var(--panel2)}
+details .in{padding:0 20px 19px;color:var(--mute);font-size:14px}
+details .in p+p{margin-top:12px}
+
+/* footer */
+footer{border-top:1px solid var(--rule);padding:52px 0 64px;background:var(--panel)}
+.fgrid{display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start}
+.fcol h4{font:500 10px/1 'IBM Plex Mono';letter-spacing:.16em;text-transform:uppercase;
+  color:var(--mute);margin-bottom:15px}
+.fcol a{display:block;color:var(--dim);font-size:14px;margin-bottom:10px;text-decoration:none}
+.fcol a:hover{color:var(--brass)}
+.fend{margin-top:44px;padding-top:24px;border-top:1px solid var(--rule);
+  display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  font:400 12.5px/1.6 'IBM Plex Mono';color:var(--faint)}
+.fend .r{margin-left:auto}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a class="brand" href="/prospekt/">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2=".35" y2="1">
+          <stop offset="0" stop-color="#E6BC63"/><stop offset="1" stop-color="#A5722A"/></linearGradient></defs>
+        <rect width="24" height="24" rx="5.5" fill="url(#lg)"/>
+        <g transform="translate(2.64 2.64) scale(0.78)">
+          <rect x="3" y="3.2" width="12" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+          <rect x="3" y="7.6" width="15.5" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+          <rect x="3" y="12" width="9.5" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+          <g transform="rotate(-13 13.25 18.6)"><rect x="5.5" y="16.7" width="15.5" height="3.8" rx="1.9" fill="#17110A"/></g>
+        </g>
+      </svg>
+      <b>Prospekt</b>
+    </a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#faq">FAQ</a>
+      <a href="support/">Support</a>
+      <a class="cta" href="#install">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></svg>Add to Chrome</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="eyebrow"><i></i>Free &amp; open source · v1.3.0</div>
+    <h1>Every page you visit, read for contacts.</h1>
+    <p class="lede">Prospekt pulls emails, phone numbers and social profiles out of the pages
+      you're already browsing. No search box, no credits, no account — and nothing ever
+      leaves your device.</p>
+    <div class="actions">
+      <a class="cta" href="#install">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></svg>Add to Chrome — free</a>
+      <a class="cta ghost" href="#how">See how it works</a>
+    </div>
+    <div class="chips">
+      <span class="chip">No account</span>
+      <span class="chip">No cloud</span>
+      <span class="chip">No credits</span>
+      <span class="chip">CSV export</span>
+      <span class="chip">Your own regex</span>
+    </div>
+
+    <div class="shot">
+      <img src="assets/screenshot-overview.png" width="1280" height="800"
+           alt="The Prospekt dashboard showing collected contacts by type, hit rate, richest domains and latest finds."
+           loading="eager">
+    </div>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <div class="kicker">How it works</div>
+    <h2>It reads the page. You keep what matters.</h2>
+    <p class="sub">Most contact finders only work on LinkedIn, or only on pages already sitting in
+      a vendor's database. Prospekt reads the text in front of you — so it works on a company's
+      team page, a conference speaker list, a directory, a forum thread, or an internal tool
+      your own company built.</p>
+
+    <div class="grid g3">
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h11M4 11h16M4 16h9"/></svg></div>
+        <h3>Extracts as you browse</h3>
+        <p>Every page you open is scanned for emails, phone numbers and profiles on LinkedIn,
+          X, GitHub, Instagram, YouTube, Facebook and TikTok.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></div>
+        <h3>Knows what's new</h3>
+        <p>Contacts you've already saved are marked as seen, so revisiting a site never
+          fills your list with the same values twice.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></svg></div>
+        <h3>Exports cleanly</h3>
+        <p>Everything, or any filtered slice, as CSV — with the source page, section and
+          date attached to each contact.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="patterns">
+  <div class="wrap">
+    <div class="kicker">Your patterns</div>
+    <h2>Every rule is a regex you can read and change.</h2>
+    <p class="sub">Edit the email and phone patterns, add social platforms, or write your own for
+      anything at all — crypto wallets, SKUs, ticket IDs, case numbers, VAT numbers. A live tester
+      highlights matches as you type, so you see what a pattern catches before you save it.</p>
+
+    <pre><span class="b">Email</span>   \b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b
+<span class="b">Ticket</span>  TCK-\d{5}
+<span class="b">SKU</span>     SKU-\d{4}-[A-Z]{2}</pre>
+
+    <div class="grid g2">
+      <div class="card">
+        <h3>Filter lists that actually filter</h3>
+        <p>Skip whole domains, drop junk email domains, ignore role prefixes like
+          <code>noreply@</code>, and strip social URLs that aren't real profiles.</p>
+      </div>
+      <div class="card">
+        <h3>Know when a pattern drifts</h3>
+        <p>Each pattern reports its match count and when it last fired — so you notice a
+          rule that's gone quiet, or one that's started catching dates instead of phone
+          numbers.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="privacy">
+  <div class="wrap">
+    <div class="kicker">Privacy</div>
+    <h2>There is no server. There is nothing to sign up for.</h2>
+    <p class="sub">Prospekt stores every contact and scan record in your browser's local storage.
+      We never receive them, because there is nowhere for them to go. No analytics, no telemetry,
+      no accounts, no ads.</p>
+
+    <div class="grid g3">
+      <div class="card">
+        <h3>Stays on your machine</h3>
+        <p>Contacts, scan history and settings live in local extension storage. Clear all of it
+          from Settings at any time.</p>
+      </div>
+      <div class="card">
+        <h3>Favicons off by default</h3>
+        <p>Fetching remote favicons would tell each site you're looking at your saved contacts,
+          so it's opt-in rather than on.</p>
+      </div>
+      <div class="card">
+        <h3>A skip list you control</h3>
+        <p>Mail, documents and messaging apps are excluded out of the box. Add any domain you
+          don't want read.</p>
+      </div>
+    </div>
+
+    <p class="sub" style="margin-top:32px">Because the data never leaves your device, you're the
+      only one holding it — and the only one responsible for using it lawfully. Check the rules
+      that apply to you before contacting anyone. Full detail in the
+      <a href="privacy/">privacy policy</a>.</p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="kicker">Questions</div>
+    <h2>The things people ask first.</h2>
+    <div style="margin-top:38px">
+
+      <details open>
+        <summary>Is it really free?</summary>
+        <div class="in"><p>Yes. No paid tier, no credit system, no trial that expires. Prospekt is
+          open source, so you can read exactly what it does with the pages you visit.</p></div>
+      </details>
+
+      <details>
+        <summary>Does it work outside LinkedIn?</summary>
+        <div class="in"><p>That's the point of it. Prospekt reads page text, so it works anywhere
+          text renders — company sites, directories, speaker lists, forums, job boards, internal
+          tools. It has no notion of "supported sites".</p></div>
+      </details>
+
+      <details>
+        <summary>Do you see the contacts I collect?</summary>
+        <div class="in"><p>No. There's no account, no sync and no server to send anything to.
+          Everything sits in your browser's local storage until you export or delete it.</p></div>
+      </details>
+
+      <details>
+        <summary>Why does it need access to all websites?</summary>
+        <div class="in"><p>Contacts turn up on arbitrary sites, so the extension can't know in
+          advance which hosts you'll need. It only reads pages you actively open, and you can
+          exclude any domain from the skip list in Settings.</p></div>
+      </details>
+
+      <details>
+        <summary>Can I get my data out?</summary>
+        <div class="in"><p>Any time, as CSV — the whole collection or any filtered slice, with
+          source page and date on every row. Scan history exports separately.</p></div>
+      </details>
+
+      <details>
+        <summary>Is scraping contacts legal?</summary>
+        <div class="in"><p>Collecting publicly posted information is generally permitted, but what
+          you then do with it is regulated in most places — GDPR, PECR, CAN-SPAM and local
+          equivalents all apply to outreach. Prospekt doesn't send anything on your behalf; how you
+          use what you collect is your responsibility.</p></div>
+      </details>
+
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap" style="text-align:center">
+    <h2 style="max-width:none;margin:0 auto">Stop copying email addresses by hand.</h2>
+    <p class="sub" style="margin:16px auto 0">Install it, browse as you normally would, and export
+      when you're ready.</p>
+    <div class="actions" style="justify-content:center">
+      <a class="cta" href="https://chromewebstore.google.com/" rel="noopener">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></svg>Add to Chrome — free</a>
+      <a class="cta ghost" href="support/">Read the docs</a>
+    </div>
+    <div class="strata" style="margin:44px auto 0">
+      <b class="e" style="flex:1946;background:#D4A24C"></b>
+      <b style="flex:412;background:#C97B5A"></b>
+      <b style="flex:401;background:#5B8AC4"></b>
+      <b style="flex:88;background:#9C7BC4"></b>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="fgrid">
+      <div class="fcol" style="flex:1.4;min-width:240px">
+        <a class="brand" href="/prospekt/" style="margin-bottom:14px">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <defs><linearGradient id="lg2" x1="0" y1="0" x2=".35" y2="1">
+              <stop offset="0" stop-color="#E6BC63"/><stop offset="1" stop-color="#A5722A"/></linearGradient></defs>
+            <rect width="24" height="24" rx="5.5" fill="url(#lg2)"/>
+            <g transform="translate(2.64 2.64) scale(0.78)">
+              <rect x="3" y="3.2" width="12" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+              <rect x="3" y="7.6" width="15.5" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+              <rect x="3" y="12" width="9.5" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+              <g transform="rotate(-13 13.25 18.6)"><rect x="5.5" y="16.7" width="15.5" height="3.8" rx="1.9" fill="#17110A"/></g>
+            </g>
+          </svg><b>Prospekt</b>
+        </a>
+        <p style="color:var(--mute);font-size:13.5px;max-width:36ch">Contact extraction for any
+          website. Built and maintained by UrsaCode.</p>
+      </div>
+      <div class="fcol">
+        <h4>Product</h4>
+        <a href="#how">How it works</a>
+        <a href="#patterns">Patterns</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://chromewebstore.google.com/" rel="noopener">Chrome Web Store</a>
+      </div>
+      <div class="fcol">
+        <h4>Help</h4>
+        <a href="support/">Support &amp; docs</a>
+        <a href="privacy/">Privacy policy</a>
+        <a href="mailto:contact@ursacode.com">Email us</a>
+      </div>
+      <div class="fcol">
+        <h4>UrsaCode</h4>
+        <a href="https://ursacode.com">ursacode.com</a>
+        <a href="https://ursacode.com/contact">Work with us</a>
+      </div>
+    </div>
+    <div class="fend">
+      <span>© <span id="yr">2026</span> UrsaCode. Prospekt is free and open source.</span>
+      <span class="r">Made by UrsaCode</span>
+    </div>
+  </div>
+</footer>
+
+<script>document.getElementById('yr').textContent=new Date().getFullYear();</script>
+</body>
+</html>

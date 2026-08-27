@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8">
+
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Support &amp; docs — Prospekt | UrsaCode</title>
+<meta name="description" content="Getting started with Prospekt, fixing common problems, writing custom patterns, and how to report a bug.">
+<link rel="canonical" href="https://ursacode.com/prospekt/support/">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#111417; --panel:#171B1F; --panel2:#1D2227; --raise:#22282E;
+  --rule:#262C32; --ink:#E9E4DA; --dim:#9AA1A7; --mute:#6B737A; --faint:#4A5157;
+  --brass:#D4A24C; --brass-deep:#8A6C33; --brass-tint:#1E1A11;
+  --copper:#C97B5A; --verdigris:#4FA894;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font-family:'Space Grotesk',system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;line-height:1.68}
+::selection{background:rgba(212,162,76,.28)}
+a{color:var(--brass);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+header{border-bottom:1px solid var(--rule);background:var(--panel);position:sticky;top:0;z-index:20}
+header .wrap{display:flex;align-items:center;gap:14px;height:64px}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink)}
+.brand svg{width:30px;height:30px;flex:none}
+.brand b{font:700 17px/1 'Space Grotesk';letter-spacing:-.015em}
+nav{margin-left:auto;display:flex;gap:6px}
+nav a{padding:8px 12px;border-radius:7px;font:500 13px/1 'Space Grotesk';color:var(--dim);text-decoration:none}
+nav a:hover{background:var(--panel2);color:var(--ink);text-decoration:none}
+
+.head{padding:60px 0 30px}
+h1{font:700 clamp(30px,4.6vw,44px)/1.12 'Space Grotesk';letter-spacing:-.025em}
+.lede{color:var(--dim);margin-top:16px;max-width:62ch;font-size:16px}
+
+.layout{display:grid;grid-template-columns:210px 1fr;gap:48px;padding-bottom:90px}
+@media(max-width:880px){.layout{grid-template-columns:1fr;gap:24px}aside{position:static!important}}
+aside{position:sticky;top:88px;align-self:start}
+aside h4{font:500 10px/1 'IBM Plex Mono';letter-spacing:.16em;text-transform:uppercase;
+  color:var(--mute);margin-bottom:14px}
+aside a{display:block;padding:7px 11px;border-radius:6px;color:var(--dim);
+  font-size:13.5px;text-decoration:none;margin-bottom:2px}
+aside a:hover{background:var(--panel2);color:var(--ink);text-decoration:none}
+
+h2{font:700 23px/1.3 'Space Grotesk';letter-spacing:-.015em;margin:0 0 8px;scroll-margin-top:88px}
+section+section{margin-top:52px}
+.sec-sub{color:var(--mute);font-size:14.5px;margin-bottom:22px}
+h3{font:600 16px/1.4 'Space Grotesk';margin:0 0 9px}
+p{color:var(--dim);margin-bottom:13px;font-size:15px}
+code{font:400 13px/1.5 'IBM Plex Mono';background:var(--panel2);border:1px solid var(--rule);
+  border-radius:4px;padding:1px 6px;color:var(--brass)}
+pre{background:var(--panel2);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;
+  overflow-x:auto;font:400 12.5px/1.8 'IBM Plex Mono';color:var(--dim);margin:14px 0}
+strong{color:var(--ink);font-weight:600}
+
+ol.steps{list-style:none;counter-reset:s;margin:22px 0 0}
+ol.steps li{counter-increment:s;position:relative;padding-left:44px;margin-bottom:20px}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:0;width:28px;height:28px;
+  border-radius:8px;background:var(--brass-tint);border:1px solid var(--brass-deep);
+  color:var(--brass);display:grid;place-items:center;font:600 12px/1 'IBM Plex Mono'}
+ol.steps p{margin:0;font-size:14.5px}
+
+.qa{background:var(--panel);border:1px solid var(--rule);border-radius:11px;
+  margin-bottom:10px;overflow:hidden}
+.qa summary{padding:16px 20px;cursor:pointer;font:600 14.5px/1.45 'Space Grotesk';
+  list-style:none;display:flex;align-items:center;gap:12px}
+.qa summary::-webkit-details-marker{display:none}
+.qa summary::after{content:"+";margin-left:auto;color:var(--brass);font:400 19px/1 'IBM Plex Mono';flex:none}
+.qa[open] summary::after{content:"−"}
+.qa summary:hover{background:var(--panel2)}
+.qa .in{padding:0 20px 18px}
+.qa .in p{font-size:14px;color:var(--mute)}
+.qa .in p:last-child{margin-bottom:0}
+
+ul.body{list-style:none;margin-bottom:14px}
+ul.body li{position:relative;padding-left:20px;color:var(--dim);margin-bottom:8px;font-size:14.5px}
+ul.body li::before{content:"";position:absolute;left:2px;top:10px;width:5px;height:5px;
+  border-radius:1px;background:var(--brass-deep)}
+
+.contact{background:var(--panel);border:1px solid var(--brass-deep);border-radius:12px;
+  padding:28px;margin-top:20px}
+.contact h3{margin-bottom:8px}
+.cta{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px;border-radius:8px;
+  background:linear-gradient(180deg,#DBAA55,#C08F38);border:1px solid var(--brass-deep);
+  color:#17110A!important;font:600 13px/1 'Space Grotesk';text-decoration:none!important;
+  margin-top:16px;transition:.15s}
+.cta:hover{background:linear-gradient(180deg,#E5B762,#CB9A3F)}
+
+footer{border-top:1px solid var(--rule);padding:38px 0;background:var(--panel)}
+footer .wrap{display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  font:400 12.5px/1.6 'IBM Plex Mono';color:var(--faint)}
+footer .r{margin-left:auto;display:flex;gap:18px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a class="brand" href="/prospekt/">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2=".35" y2="1">
+          <stop offset="0" stop-color="#E6BC63"/><stop offset="1" stop-color="#A5722A"/></linearGradient></defs>
+        <rect width="24" height="24" rx="5.5" fill="url(#lg)"/>
+        <g transform="translate(2.64 2.64) scale(0.78)">
+          <rect x="3" y="3.2" width="12" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+          <rect x="3" y="7.6" width="15.5" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+          <rect x="3" y="12" width="9.5" height="2.8" rx="1.4" fill="#1A1309" opacity=".42"/>
+          <g transform="rotate(-13 13.25 18.6)"><rect x="5.5" y="16.7" width="15.5" height="3.8" rx="1.9" fill="#17110A"/></g>
+        </g>
+      </svg><b>Prospekt</b>
+    </a>
+    <nav>
+      <a href="/prospekt/">Overview</a>
+      <a href="../privacy/">Privacy</a>
+      <a href="mailto:contact@ursacode.com">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<div class="head">
+  <div class="wrap">
+    <h1>Support &amp; docs</h1>
+    <p class="lede">Getting started, fixing the things that usually go wrong, and writing patterns
+      of your own. If none of this covers it, email us — a person reads it.</p>
+  </div>
+</div>
+
+<div class="wrap layout">
+
+  <aside>
+    <h4>On this page</h4>
+    <a href="#start">Getting started</a>
+    <a href="#nothing">Nothing is being found</a>
+    <a href="#junk">Too much junk</a>
+    <a href="#patterns">Writing patterns</a>
+    <a href="#export">Exporting</a>
+    <a href="#storage">Storage limits</a>
+    <a href="#faq">Other questions</a>
+    <a href="#bug">Report a bug</a>
+  </aside>
+
+  <div>
+
+    <section id="start">
+      <h2>Getting started</h2>
+      <p class="sec-sub">Prospekt works from the moment it's installed. There is nothing to configure.</p>
+      <ol class="steps">
+        <li><p><strong>Install and pin it.</strong> Click the puzzle-piece icon in Chrome's toolbar
+          and pin Prospekt, so you can see the badge as you browse.</p></li>
+        <li><p><strong>Browse normally.</strong> Every page you open is read as it loads. The
+          toolbar popup shows what the current page gave up.</p></li>
+        <li><p><strong>Act before you leave.</strong> Copy a single value, copy everything new, or
+          export the page — all from the popup.</p></li>
+        <li><p><strong>Open the dashboard</strong> when you want the whole collection: filter it,
+          select in bulk, and export as CSV.</p></li>
+      </ol>
+    </section>
+
+    <section id="nothing">
+      <h2>Nothing is being found</h2>
+      <p class="sec-sub">Almost always one of five things.</p>
+
+      <details class="qa" open>
+        <summary>Auto-scan is paused</summary>
+        <div class="in"><p>Check the pill in the top-right of the popup. If it reads
+          <strong>Paused</strong> rather than <strong>Live</strong>, click it. The same toggle sits
+          at the bottom of the dashboard sidebar.</p></div>
+      </details>
+
+      <details class="qa">
+        <summary>The domain is on your skip list</summary>
+        <div class="in"><p>The popup will say so directly. Mail, documents and messaging domains
+          are skipped by default. Remove the domain under
+          <strong>Settings → Filter lists → Skip domains</strong>, or use <em>Scan this page once</em>
+          in the popup.</p></div>
+      </details>
+
+      <details class="qa">
+        <summary>The page loaded its content after the scan</summary>
+        <div class="in"><p>Single-page apps often render content after the initial load. Press the
+          <strong>rescan</strong> button in the popup — the circular arrow next to Export — once the
+          content you want is on screen.</p></div>
+      </details>
+
+      <details class="qa">
+        <summary>The contact is an image, not text</summary>
+        <div class="in"><p>Some sites publish addresses as pictures specifically to defeat
+          extraction. Prospekt reads text only and does not perform OCR, so there is nothing for it
+          to match.</p></div>
+      </details>
+
+      <details class="qa">
+        <summary>A filter is discarding it</summary>
+        <div class="in"><p>Check <strong>Junk email domains</strong> and <strong>Junk email
+          prefixes</strong> in Settings. Addresses like <code>info@</code> and
+          <code>noreply@</code> are dropped by default — remove the prefix from the list if you
+          want them kept.</p></div>
+      </details>
+    </section>
+
+    <section id="junk">
+      <h2>Too much junk is being collected</h2>
+      <p class="sec-sub">Usually a pattern that's matching more than you intended.</p>
+      <p>Open <strong>Insights → Pattern performance</strong>. Each pattern shows its match count,
+        when it last fired, and a health note. A pattern flagged as unhealthy is the place to
+        start — the phone pattern in particular can pick up dates and reference numbers on some
+        sites.</p>
+      <p>Then go to <strong>Settings</strong>, click <strong>Test</strong> on that pattern, and
+        paste in a page's text. Matches highlight live as you edit the expression, so you can
+        tighten it until only the right things light up.</p>
+      <p>Two quick wins that need no regex at all:</p>
+      <ul class="body">
+        <li>Add noisy domains to <strong>Skip domains</strong> — CDNs and analytics hosts are
+          common culprits.</li>
+        <li>Use the <strong>Hide role addresses</strong> filter on the Contacts page to set aside
+          <code>info@</code>-style results without deleting them.</li>
+      </ul>
+    </section>
+
+    <section id="patterns">
+      <h2>Writing your own patterns</h2>
+      <p class="sec-sub">Anything you can express as a JavaScript regular expression.</p>
+      <p>Go to <strong>Settings → Custom patterns → Add custom pattern</strong>. Give it a label,
+        an expression and flags. Matches are stored with the <code>custom</code> type and can be
+        filtered separately everywhere in the dashboard.</p>
+      <pre>Ticket IDs     TCK-\d{5}
+Product SKUs   SKU-\d{4}-[A-Z]{2}
+UK VAT         GB\d{9}
+BTC address    \b(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}\b</pre>
+      <p>Flags default to <code>g</code>, which finds every match rather than just the first. Add
+        <code>i</code> to ignore case. Always open the tester before saving — an over-broad pattern
+        can fill your collection quickly, and saving triggers a rescan of every open tab.</p>
+    </section>
+
+    <section id="export">
+      <h2>Exporting</h2>
+      <p class="sec-sub">Everything, or exactly the slice you want.</p>
+      <ul class="body">
+        <li><strong>Everything</strong> — the Export button in the dashboard header.</li>
+        <li><strong>A filtered slice</strong> — apply your filters on the Contacts page first, then
+          export; only what's visible is included.</li>
+        <li><strong>A selection</strong> — tick rows and use Export in the selection bar.</li>
+        <li><strong>One page's worth</strong> — the Export button in the popup.</li>
+        <li><strong>Scan history</strong> — exports separately from Scan history or Settings.</li>
+      </ul>
+      <p>Files are UTF-8 CSV with a header row, and open directly in Excel, Google Sheets and
+        Numbers. Each row carries the value, type, domain, source page and dates.</p>
+    </section>
+
+    <section id="storage">
+      <h2>Storage limits</h2>
+      <p class="sec-sub">Two caps, both adjustable, both there to protect your browser.</p>
+      <p><strong>Maximum stored domains</strong> (default 5,000) limits scan records. Past the
+        limit the oldest records are dropped — your contacts are never touched. <strong>Maximum
+        stored contacts</strong> (default 20,000) caps the collection itself; at the limit, new
+        contacts stop being saved rather than overwriting old ones.</p>
+      <p>Current usage against both is shown in Settings, and on the Scan history page. If you're
+        approaching the contact limit, export first, then clear what you no longer need.</p>
+    </section>
+
+    <section id="faq">
+      <h2>Other questions</h2>
+
+      <details class="qa">
+        <summary>Does my data sync between computers?</summary>
+        <div class="in"><p>No. Everything is stored locally in one browser profile. To move a
+          collection, export the CSV. To move your configuration, use <strong>Export
+          settings</strong> in the Settings header and import the file on the other machine.</p></div>
+      </details>
+
+      <details class="qa">
+        <summary>Will it slow down my browsing?</summary>
+        <div class="in"><p>Scanning runs once per page load against text already in memory, and
+          typically finishes in a few milliseconds. If you notice a slowdown on a specific site,
+          tell us which one — an unbounded custom pattern is the usual cause.</p></div>
+      </details>
+
+      <details class="qa">
+        <summary>Does it work in Edge, Brave or Opera?</summary>
+        <div class="in"><p>Prospekt is a Chromium extension, so it generally installs and runs on
+          Chromium-based browsers from the Chrome Web Store. We test on Chrome; other browsers are
+          unsupported but usually fine.</p></div>
+      </details>
+
+      <details class="qa">
+        <summary>What happens if I uninstall it?</summary>
+        <div class="in"><p>Chrome removes all of the extension's stored data along with it —
+          contacts, scan history and settings. Export anything you want to keep first, because we
+          hold no copy and cannot restore it.</p></div>
+      </details>
+
+      <details class="qa">
+        <summary>Can I use the contacts I collect for outreach?</summary>
+        <div class="in"><p>That depends on where you and your recipients are. Contact details of
+          identifiable people are personal data under GDPR and similar laws, and outreach is
+          regulated separately again. Prospekt sends nothing on your behalf — please check your
+          own obligations first. See the <a href="../privacy/">privacy policy</a>.</p></div>
+      </details>
+    </section>
+
+    <section id="bug">
+      <h2>Report a bug</h2>
+      <p class="sec-sub">The more of this you can give us, the faster it gets fixed.</p>
+      <ul class="body">
+        <li>What you expected, and what happened instead</li>
+        <li>The URL where it happened, if it's a public page</li>
+        <li>Your Chrome version and operating system</li>
+        <li>The pattern involved, if it's an extraction problem</li>
+        <li>Anything in the extension's console (right-click the popup → Inspect)</li>
+      </ul>
+
+      <div class="contact">
+        <h3>Still stuck?</h3>
+        <p>Email us with what you have. Prospekt is free, but support isn't an afterthought — we
+          answer everything.</p>
+        <a class="cta" href="mailto:contact@ursacode.com?subject=Prospekt%20support">contact@ursacode.com</a>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr">2026</span> UrsaCode</span>
+    <span class="r">
+      <a href="/prospekt/">Prospekt</a>
+      <a href="../privacy/">Privacy</a>
+      <a href="https://ursacode.com">ursacode.com</a>
+    </span>
+  </div>
+</footer>
+
+<script>document.getElementById('yr').textContent=new Date().getFullYear();</script>
+</body>
+</html>
