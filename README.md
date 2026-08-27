@@ -1,18 +1,26 @@
-# Prospekt
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="Prospekt — emails, phones and social profiles off any page you visit, on your own device" width="820">
+</p>
+
+<p align="center">
+  <a href="https://ursacode.github.io/prospekt/"><b>See it &rarr;</b></a> &nbsp;·&nbsp;
+  <a href="https://ursacode.com">UrsaCode</a> &nbsp;·&nbsp;
+  <a href="https://github.com/UrsaCode/prospekt/actions/workflows/ci.yml"><img src="https://github.com/UrsaCode/prospekt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/manifest-v3-D4A24C" alt="Manifest V3">
+  <img src="https://img.shields.io/badge/chrome-111%2B-D4A24C" alt="Chrome 111+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-green" alt="MIT licence"></a>
+</p>
+
+---
 
 **Contact intelligence that never leaves your browser.** Prospekt reads the pages
 you visit and keeps the emails, phone numbers, social profiles and anything else
 you write a pattern for — on your own machine, with no account, no server and no
 network calls.
 
-A local alternative to Hunter.io, Snov.io and similar prospecting tools.
-
-[**ursacode.com/prospekt**](https://ursacode.com/prospekt) — overview and Chrome
-Web Store link · built and maintained by [UrsaCode](https://ursacode.com)
-
-MIT licensed · Manifest V3 · Chrome 111+ · no dependencies, no build step
-
----
+A local alternative to Hunter.io, Snov.io and similar prospecting tools. Free and
+open source; a [Chrome extension](https://ursacode.github.io/prospekt/) built and
+maintained by [UrsaCode](https://ursacode.com).
 
 ## What it does
 

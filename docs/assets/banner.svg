@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 280" width="1200" height="280" role="img" aria-label="Prospekt — pulls emails, phones and social profiles off any page you visit, on your own device">
+  <title>Prospekt</title>
+  <desc>A page of text lines with a magnifier drawn over it, pulling three contacts — an email, a phone number and a social handle — out to the side. Nothing leaves the page it was read from.</desc>
+
+  <rect width="1200" height="280" fill="#14100a"/>
+  <rect width="1200" height="280" fill="url(#glow)"/>
+
+  <defs>
+    <radialGradient id="glow" cx="72%" cy="42%" r="55%">
+      <stop offset="0%" stop-color="#D4A24C" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#D4A24C" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Wordmark -->
+  <g transform="translate(72 108)">
+    <text x="0" y="0" font-family="'Space Grotesk', 'Segoe UI', system-ui, sans-serif" font-size="58" font-weight="700" fill="#F2ECE0" letter-spacing="-1.5">Prospekt</text>
+    <text x="2" y="40" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="16" fill="#B98F45" letter-spacing="3">CONTACT INTELLIGENCE</text>
+    <text x="2" y="86" font-family="'Segoe UI', system-ui, sans-serif" font-size="19" fill="#9a917f">Emails, phones and social profiles off any page you visit —</text>
+    <text x="2" y="112" font-family="'Segoe UI', system-ui, sans-serif" font-size="19" fill="#9a917f">kept on your own device. No account.</text>
+  </g>
+
+  <!-- The page being read -->
+  <g transform="translate(720 54)">
+    <rect x="0" y="0" width="300" height="172" rx="12" fill="#1d1710" stroke="#2c2418" stroke-width="1.5"/>
+    <rect x="26" y="30" width="150" height="9" rx="4.5" fill="#4a4234"/>
+    <rect x="26" y="54" width="210" height="9" rx="4.5" fill="#4a4234"/>
+    <rect x="26" y="78" width="110" height="9" rx="4.5" fill="#4a4234"/>
+    <rect x="26" y="102" width="184" height="9" rx="4.5" fill="#4a4234"/>
+    <rect x="26" y="126" width="140" height="9" rx="4.5" fill="#4a4234"/>
+
+    <!-- Magnifier over the page -->
+    <g transform="translate(150 96)">
+      <circle cx="0" cy="0" r="46" fill="#D4A24C" fill-opacity="0.08" stroke="#E6BC63" stroke-width="5"/>
+      <line x1="33" y1="33" x2="66" y2="66" stroke="#E6BC63" stroke-width="7" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- Contacts pulled out -->
+  <g transform="translate(1030 66)" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="12.5">
+    <g transform="translate(0 0)">
+      <rect x="0" y="0" width="112" height="30" rx="7" fill="#1d1710" stroke="#3a2f1c" stroke-width="1"/>
+      <circle cx="16" cy="15" r="3" fill="#E6BC63"/>
+      <text x="28" y="19" fill="#cbb98e">EMAIL</text>
+    </g>
+    <g transform="translate(0 48)">
+      <rect x="0" y="0" width="112" height="30" rx="7" fill="#1d1710" stroke="#3a2f1c" stroke-width="1"/>
+      <circle cx="16" cy="15" r="3" fill="#C97B5A"/>
+      <text x="28" y="19" fill="#cbb98e">PHONE</text>
+    </g>
+    <g transform="translate(0 96)">
+      <rect x="0" y="0" width="112" height="30" rx="7" fill="#1d1710" stroke="#3a2f1c" stroke-width="1"/>
+      <circle cx="16" cy="15" r="3" fill="#9C7BC4"/>
+      <text x="28" y="19" fill="#cbb98e">SOCIAL</text>
+    </g>
+    <!-- links from magnifier to chips -->
+    <path d="M-24 15 H0" stroke="#3a2f1c" stroke-width="1.5"/>
+    <path d="M-24 63 H0" stroke="#3a2f1c" stroke-width="1.5"/>
+    <path d="M-24 111 H0" stroke="#3a2f1c" stroke-width="1.5"/>
+  </g>
+</svg>
