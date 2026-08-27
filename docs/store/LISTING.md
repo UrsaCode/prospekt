@@ -1,5 +1,21 @@
 # Prospekt — Chrome Web Store listing copy
 
+## Status
+
+**Version 1.3.0 submitted, awaiting review.**
+
+| | |
+|---|---|
+| Item ID |  |
+| Listing | https://chromewebstore.google.com/detail/prospekt/mgfppglljkglalgkociodfgmmodhhphi |
+| Dashboard | https://chrome.google.com/webstore/devconsole |
+
+The listing URL returns nothing until the item is approved. The item ID is
+permanent: every future version uploads to *this* item, from the same developer
+account. When it is approved, add the store link to the site and the README.
+
+---
+
 Everything below is ready to paste into the Developer Dashboard. Character-limited
 fields show their count.
 
@@ -237,9 +253,10 @@ Certification checkboxes: you do not sell data, do not use it for purposes
 unrelated to the single purpose, and do not use it for creditworthiness or lending.
 
 **Privacy policy: required.** Even with zero transmission, Chrome requires a
-policy URL for any extension handling personal information. Host it at
-`ursacode.com/prospekt/privacy` and state clearly that no data is transmitted,
-where data is stored, and how a user deletes it.
+policy URL for any extension handling personal information. It is live at
+`https://ursacode.com/prospekt/privacy/` (mirrored at
+`https://ursacode.github.io/prospekt/privacy/`) and states that no data is
+transmitted, where data is stored, and how a user deletes it.
 
 ---
 
@@ -259,9 +276,9 @@ OSINT, data extraction.
 
 | Field | Value |
 |---|---|
-| Homepage URL | `https://ursacode.com/prospekt` |
-| Support URL | `https://ursacode.com/prospekt/support` |
-| Privacy policy | `https://ursacode.com/prospekt/privacy` |
+| Homepage URL | `https://ursacode.com/prospekt/` |
+| Support URL | `https://ursacode.com/prospekt/support/` |
+| Privacy policy | `https://ursacode.com/prospekt/privacy/` |
 
 ---
 
