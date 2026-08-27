@@ -1,0 +1,35 @@
+name: Bug report
+description: Something behaves differently from how it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please don't paste contact data you extracted. Describe the *shape* of
+        the page — a company team page, a directory, a forum thread — rather
+        than its contents.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: The shortest path to seeing it again.
+  - type: input
+    id: chrome
+    attributes:
+      label: Chrome version
+      placeholder: "142.0.7444.0"
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: >
+        From the page console, or the service-worker console
+        (chrome://extensions → Prospekt → "service worker"). Optional.
+      render: text

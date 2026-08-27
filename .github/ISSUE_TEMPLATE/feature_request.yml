@@ -1,0 +1,16 @@
+name: Idea
+description: Something Prospekt should do that it doesn't
+labels: [idea]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: Describe the situation rather than the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you had in mind
+      description: Optional. A rough shape is fine.

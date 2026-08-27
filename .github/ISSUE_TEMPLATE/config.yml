@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: mailto:security@ursacode.com
+    about: >
+      Report anything with security implications privately rather than as a
+      public issue. Describe the class of problem, not a working exploit.
