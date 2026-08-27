@@ -6,7 +6,7 @@
 
 | | |
 |---|---|
-| Item ID |  |
+| Item ID | `mgfppglljkglalgkociodfgmmodhhphi` |
 | Listing | https://chromewebstore.google.com/detail/prospekt/mgfppglljkglalgkociodfgmmodhhphi |
 | Dashboard | https://chrome.google.com/webstore/devconsole |
 
