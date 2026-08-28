@@ -2,13 +2,33 @@
 
 ## Status
 
-**Version 1.3.0 submitted, awaiting review.**
+**v1 was rejected for keyword spam. Description fixed — ready to resubmit.**
 
 | | |
 |---|---|
 | Item ID | `mgfppglljkglalgkociodfgmmodhhphi` |
 | Listing | https://chromewebstore.google.com/detail/prospekt/mgfppglljkglalgkociodfgmmodhhphi |
 | Dashboard | https://chrome.google.com/webstore/devconsole |
+
+### The rejection (28 Aug 2026)
+
+> **Keyword Spam** — "Having excessive and/or irrelevant keywords in the item's
+> description." Flagged content: *LinkedIn, X, GitHub, Instagram, YouTube,
+> Facebook and TikTok.* (Routing ID FZSL.)
+
+The listing's detailed description listed seven platform brand names in a row to
+catch their search traffic; the reviewer read that as keyword stuffing.
+
+### The fix
+
+**Metadata only — the extension code and the uploaded zip do not change.** The
+brand-name list is gone from the detailed description below; the capability is
+now described generically ("links to social and professional profiles — on any
+network"). The one remaining comparative "LinkedIn" was also generalised.
+
+To resubmit: Dashboard → Prospekt → **Store listing** → replace the **Detailed
+description** with the corrected block below → **Save draft** → **Submit for
+review**. No new upload is needed, so the version stays 1.3.0.
 
 The listing URL returns nothing until the item is approved. The item ID is
 permanent: every future version uploads to *this* item, from the same developer
@@ -81,8 +101,8 @@ it collects, and everything stays on your machine.
 WHAT IT DOES
 
 • Reads every page you open and extracts contacts as you go
-• Finds email addresses, phone numbers, and profiles on LinkedIn, X, GitHub,
-  Instagram, YouTube, Facebook and TikTok
+• Finds email addresses, phone numbers, and links to social and professional
+  profiles — on any network, using patterns you control
 • Shows you what the current page gave up, before you navigate away
 • Marks what's new versus what you've already saved, so nothing is counted twice
 • Records where each contact came from — the page, the section, the date
@@ -91,8 +111,9 @@ WHAT IT DOES
 
 WORKS ON ANY SITE
 
-Most contact finders only work on LinkedIn, or only on pages already in a vendor's
-database. Prospekt reads the text in front of you, so it works on a company's team
+Most contact finders only work on one professional network, or only on pages
+already in a vendor's database. Prospekt reads the text in front of you, so it
+works on a company's team
 page, a conference speaker list, a directory, a forum thread, a PDF viewer, or an
 internal tool your company built. If the text is on the page, Prospekt can catch it.
 
@@ -264,11 +285,16 @@ transmitted, where data is stored, and how a user deletes it.
 
 Chrome indexes name, short description and detailed description. Terms already
 covered above: email extractor, contact extractor, email finder, phone number
-extractor, lead generation, scraper, regex, CSV export, LinkedIn, prospecting,
-web scraping, contact scraper, email scraper.
+extractor, lead generation, scraper, regex, CSV export, prospecting, web
+scraping, contact scraper, email scraper.
 
 Not covered — add if you want them: B2B, outreach, sourcing, recruiting,
 OSINT, data extraction.
+
+**Do not list third-party brand names** (LinkedIn, X, Instagram, YouTube,
+Facebook, TikTok, GitHub) to catch their search traffic. That is exactly what
+the v1 submission was rejected for — "keyword spam" — and it will be again.
+Describe the capability ("social and professional profiles"), not the brands.
 
 ---
 
