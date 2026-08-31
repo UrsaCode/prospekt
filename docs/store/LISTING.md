@@ -2,7 +2,8 @@
 
 ## Status
 
-**v1 was rejected for keyword spam. Description fixed — ready to resubmit.**
+**Live on the Chrome Web Store.** v1 was rejected for keyword spam; the
+description was fixed (brand-name list removed) and the item was approved.
 
 | | |
 |---|---|
@@ -10,29 +11,22 @@
 | Listing | https://chromewebstore.google.com/detail/prospekt/mgfppglljkglalgkociodfgmmodhhphi |
 | Dashboard | https://chrome.google.com/webstore/devconsole |
 
-### The rejection (28 Aug 2026)
+The store link now lives on the site (`website` branch), the README and the
+UrsaCode profile. The item ID is permanent: every future version uploads to
+*this* item, from the same developer account.
+
+### History — the keyword-spam rejection (28 Aug 2026)
 
 > **Keyword Spam** — "Having excessive and/or irrelevant keywords in the item's
 > description." Flagged content: *LinkedIn, X, GitHub, Instagram, YouTube,
 > Facebook and TikTok.* (Routing ID FZSL.)
 
-The listing's detailed description listed seven platform brand names in a row to
-catch their search traffic; the reviewer read that as keyword stuffing.
-
-### The fix
-
-**Metadata only — the extension code and the uploaded zip do not change.** The
-brand-name list is gone from the detailed description below; the capability is
-now described generically ("links to social and professional profiles — on any
-network"). The one remaining comparative "LinkedIn" was also generalised.
-
-To resubmit: Dashboard → Prospekt → **Store listing** → replace the **Detailed
-description** with the corrected block below → **Save draft** → **Submit for
-review**. No new upload is needed, so the version stays 1.3.0.
-
-The listing URL returns nothing until the item is approved. The item ID is
-permanent: every future version uploads to *this* item, from the same developer
-account. When it is approved, add the store link to the site and the README.
+The detailed description listed seven platform brand names in a row to catch
+their search traffic; the reviewer read that as keyword stuffing. The fix was
+**metadata only** — the brand-name list was replaced with a generic description
+("links to social and professional profiles — on any network") and the one
+comparative "LinkedIn" was generalised. No new upload; the version stayed 1.3.0.
+The corrected copy is the block below, and it is what got approved.
 
 ---
 

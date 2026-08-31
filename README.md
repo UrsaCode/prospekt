@@ -3,11 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="https://ursacode.github.io/prospekt/"><b>See it &rarr;</b></a> &nbsp;·&nbsp;
+  <a href="https://chromewebstore.google.com/detail/prospekt/mgfppglljkglalgkociodfgmmodhhphi"><b>Add to Chrome &rarr;</b></a> &nbsp;·&nbsp;
+  <a href="https://ursacode.github.io/prospekt/">Site</a> &nbsp;·&nbsp;
   <a href="https://ursacode.com">UrsaCode</a> &nbsp;·&nbsp;
+  <a href="https://chromewebstore.google.com/detail/prospekt/mgfppglljkglalgkociodfgmmodhhphi"><img src="https://img.shields.io/chrome-web-store/v/mgfppglljkglalgkociodfgmmodhhphi?label=chrome%20web%20store&color=D4A24C" alt="Chrome Web Store"></a>
+  <a href="https://chromewebstore.google.com/detail/prospekt/mgfppglljkglalgkociodfgmmodhhphi"><img src="https://img.shields.io/chrome-web-store/users/mgfppglljkglalgkociodfgmmodhhphi?color=7C8492" alt="Users"></a>
   <a href="https://github.com/UrsaCode/prospekt/actions/workflows/ci.yml"><img src="https://github.com/UrsaCode/prospekt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/manifest-v3-D4A24C" alt="Manifest V3">
-  <img src="https://img.shields.io/badge/chrome-111%2B-D4A24C" alt="Chrome 111+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-green" alt="MIT licence"></a>
 </p>
 
@@ -57,6 +59,10 @@ A tester that overstates is worse than none, so it tells you the truth before yo
 save a pattern rather than after it has polluted the library.
 
 ## Install
+
+**[Add to Chrome](https://chromewebstore.google.com/detail/prospekt/mgfppglljkglalgkociodfgmmodhhphi)** — the reviewed build, one click, auto-updating. This is the way to install it.
+
+Prefer to build from source, or want unreleased code? Clone and load it unpacked:
 
 ```bash
 git clone https://github.com/UrsaCode/prospekt.git
