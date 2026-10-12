@@ -17,7 +17,7 @@
   "engines": {
     "node": ">=18"
   },
-  "homepage": "https://ursacode.com/prospekt",
+  "homepage": "https://ursacode.github.io/prospekt/",
   "author": "UrsaCode",
   "bugs": {
     "url": "https://github.com/UrsaCode/prospekt/issues"

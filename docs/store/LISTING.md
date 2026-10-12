@@ -269,8 +269,8 @@ unrelated to the single purpose, and do not use it for creditworthiness or lendi
 
 **Privacy policy: required.** Even with zero transmission, Chrome requires a
 policy URL for any extension handling personal information. It is live at
-`https://ursacode.com/prospekt/privacy/` (mirrored at
-`https://ursacode.github.io/prospekt/privacy/`) and states that no data is
+`https://ursacode.github.io/prospekt/privacy/` (the old ursacode.com/prospekt/
+address redirects there) and states that no data is
 transmitted, where data is stored, and how a user deletes it.
 
 ---
@@ -296,9 +296,9 @@ Describe the capability ("social and professional profiles"), not the brands.
 
 | Field | Value |
 |---|---|
-| Homepage URL | `https://ursacode.com/prospekt/` |
-| Support URL | `https://ursacode.com/prospekt/support/` |
-| Privacy policy | `https://ursacode.com/prospekt/privacy/` |
+| Homepage URL | `https://ursacode.github.io/prospekt/` |
+| Support URL | `https://ursacode.github.io/prospekt/support/` |
+| Privacy policy | `https://ursacode.github.io/prospekt/privacy/` |
 
 ---
 
